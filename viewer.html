@@ -172,13 +172,25 @@
   #detailPanel h3 { margin: 0 0 6px 0; font-size: 13px; }
   #detailPanel .closeBtn { float: right; cursor: pointer; color: var(--muted); font-weight: 700; }
   #detailPanel pre { font-size: 10.5px; background: var(--tag-bg); padding: 8px; border-radius: 6px; overflow-x: auto; max-height: 240px; }
-  #legend {
+  #legend, .legend-box {
     position: absolute; bottom: 12px; left: 12px; background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; padding: 8px 10px; font-size: 10.5px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap;
     max-width: 320px;
   }
-  #legend span { display: flex; align-items: center; gap: 4px; }
-  #legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  #legend span, .legend-box span { display: flex; align-items: center; gap: 4px; }
+  #legend i, .legend-box i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  /* Universe mode (all conversations at once, canvas-rendered for scale) */
+  #universeWrap { position: absolute; inset: 0; overflow: hidden; background: var(--canvas-bg); cursor: grab; }
+  #universeWrap.panning { cursor: grabbing; }
+  #universeCanvas { position: absolute; top: 0; left: 0; }
+  #universeLoading {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.4); color: white; font-size: 14px; z-index: 5;
+  }
+  #universeLoadingText {
+    background: var(--panel); color: var(--text); padding: 16px 24px; border-radius: 10px; border: 1px solid var(--border);
+  }
 </style>
 </head>
 <body>
@@ -202,6 +214,7 @@
     <div id="toolbar">
       <button id="graphModeBtn" class="active">Graph</button>
       <button id="readerModeBtn">Reader</button>
+      <button id="universeModeBtn">All Conversations</button>
       <span style="width:1px;height:16px;background:var(--border)"></span>
       <button id="backBtn" disabled>&larr; Back</button>
       <button id="restartBtn" disabled>&#8635; Restart</button>
@@ -215,6 +228,13 @@
       <div id="graphWrap">
         <svg id="graphSvg" width="0" height="0"></svg>
         <div id="legend"></div>
+      </div>
+      <div id="universeWrap" style="display:none">
+        <canvas id="universeCanvas"></canvas>
+        <div id="universeLoading" style="display:none">
+          <div id="universeLoadingText">Loading all conversations...</div>
+        </div>
+        <div id="universeLegend" class="legend-box"></div>
       </div>
       <div id="detailPanel"></div>
     </div>
@@ -627,6 +647,18 @@ async function selectFlow(flowId, file, jumpRid = null) {
   document.getElementById("placeholder").style.display = "none";
   document.getElementById("crumbInfo").textContent = `${currentChunkId} — ${currentFlowId}`;
 
+  if (viewMode === "universe") {
+    // picking a specific flow is a strong signal to focus on just that one --
+    // drop back to the single-conversation Graph view rather than trying to
+    // fly to it inside the (possibly not-yet-loaded) universe.
+    viewMode = "graph";
+    hideAllModeViews();
+    document.getElementById("graphModeBtn").classList.add("active");
+    document.getElementById("graphWrap").style.display = "block";
+    document.getElementById("backBtn").style.display = "none";
+    document.getElementById("restartBtn").style.display = "none";
+    document.getElementById("zoomResetBtn").style.display = "inline-block";
+  }
   if (viewMode === "graph") await openGraph(flowId, file, jumpRid);
   else await openReaderStart(flowId, file, jumpRid);
   // note: openGraph/openReaderStart/navigateTo/onNodeClick each already call
@@ -814,8 +846,7 @@ function centerOnNode(gn) {
   drawGraph();
 }
 
-async function buildGraph(flowId, file) {
-  const chunk = await getChunk(file);
+function buildFlowGraphFromChunk(flowId, chunk) {
   const cardMap = chunk.flows[flowId] || {};
   const nodes = chunk.nodes;
   const gnodes = new Map(); // key -> {key, node, external, depth, flowId, cardId}
@@ -873,7 +904,14 @@ async function buildGraph(flowId, file) {
     arr.forEach((gn, i) => { gn.lane = i; });
   }
 
-  return { gnodes, edges, file, flowId, nodes };
+  return { gnodes, edges, flowId, nodes };
+}
+
+async function buildGraph(flowId, file) {
+  const chunk = await getChunk(file);
+  const result = buildFlowGraphFromChunk(flowId, chunk);
+  result.file = file;
+  return result;
 }
 
 function nodeXY(gn) {
@@ -1015,8 +1053,8 @@ function drawGraph() {
   drawLegend();
 }
 
-function drawLegend() {
-  const el = document.getElementById("legend");
+function drawLegend(targetId = "legend") {
+  const el = document.getElementById(targetId);
   const items = [
     ["#3ba55d", "start/end"], ["#5865f2", "dialogue"], ["#faa61a", "fork (condition)"],
     ["#949cf7", "hub"], ["#ed4245", "jump"], ["#3ba57a", "passive check"],
@@ -1136,34 +1174,380 @@ graphWrap.addEventListener("wheel", (e) => {
   if (g) g.setAttribute("transform", `translate(${panX},${panY}) scale(${zoom})`);
 }, { passive: false });
 document.getElementById("zoomResetBtn").addEventListener("click", () => {
+  if (viewMode === "universe") {
+    if (universeClusters) { fitUniverseView(); scheduleDrawUniverse(); }
+    return;
+  }
   panX = 0; panY = 40; zoom = 1;
   const g = document.getElementById("viewport");
   if (g) g.setAttribute("transform", `translate(${panX},${panY}) scale(${zoom})`);
 });
 
+/* ================= UNIVERSE MODE (every conversation at once) =================
+ * Up to ~78,000 cards across 1,414 conversations -- one DOM element per node
+ * (the SVG/foreignObject approach the per-conversation Graph view uses) does
+ * not scale to that. This renders to a single <canvas> instead: no per-node
+ * DOM cost, viewport culling (skip whole clusters outside the visible area
+ * before even touching their nodes), and level-of-detail (skip text entirely
+ * until zoomed in far enough to read it). Each conversation keeps its own
+ * local layout (same depth/lane algorithm as the per-conversation view) and
+ * conversations are shelf-packed next to each other with no attempt to draw
+ * connections between them -- "floating adjacently," per the brief. Jump
+ * cards can still fast-travel across conversations on double-click via a
+ * global cardKey->location index, even though nothing is drawn between them.
+ */
+let universeClusters = null; // [{flowId, file, gnodes, edges, nodes, offsetX, offsetY, width, height}]
+let universeCardLocation = null; // "flowId::cardId" -> {cluster, gn, absX, absY}
+let uPanX = 0, uPanY = 0, uZoom = 0.15;
+let uSelected = null; // {cluster, gn}
+let uConnectedKeys = null; // Set of gn.key, scoped to uSelected.cluster
+let uDrawScheduled = false;
+
+const UNIVERSE_MAX_ROW_WIDTH = 26000;
+const UNIVERSE_CLUSTER_GAP = 160;
+const UNIVERSE_LOD_TEXT_ZOOM = 0.4;
+const UNIVERSE_LOD_MIN_ZOOM = 0.02;
+
+const NODE_COLORS = {
+  start: "#3ba55d", end: "#3ba55d", bark: "#5865f2", frag: "#5865f2", janus: "#5865f2",
+  fork: "#faa61a", hub: "#949cf7", jump: "#ed4245", passive: "#3ba57a", antipassive: "#d1495b",
+  check: "#9aa0a6", other: "#5c6067", external: "#6a6d73",
+};
+function nodeColor(gn) {
+  return NODE_COLORS[nodeTypeClass(gn.external ? null : gn.node)] || "#5c6067";
+}
+
+async function loadUniverse() {
+  const overlay = document.getElementById("universeLoading");
+  if (universeClusters) { scheduleDrawUniverse(); return; } // already built once this session
+
+  overlay.style.display = "flex";
+  const textEl = document.getElementById("universeLoadingText");
+  const clusters = [];
+  const total = flowsIndex.length;
+
+  for (let i = 0; i < total; i++) {
+    const f = flowsIndex[i];
+    const chunk = await getChunk(f.file);
+    const g = buildFlowGraphFromChunk(f.flowId, chunk);
+    let maxDepth = 0, maxLane = 0;
+    for (const gn of g.gnodes.values()) {
+      if (gn.depth > maxDepth) maxDepth = gn.depth;
+      if (gn.lane !== undefined && gn.lane > maxLane) maxLane = gn.lane;
+    }
+    clusters.push({
+      flowId: f.flowId, file: f.file, gnodes: g.gnodes, edges: g.edges, nodes: g.nodes,
+      width: (maxDepth + 1) * (COL_W + COL_GAP),
+      height: (maxLane + 1) * (ROW_H + ROW_GAP),
+    });
+    if (i % 15 === 0 || i === total - 1) {
+      textEl.textContent = `Loading all conversations... ${i + 1}/${total}`;
+      await new Promise(r => setTimeout(r, 0)); // yield so the overlay text actually paints
+    }
+  }
+
+  // shelf-pack: place clusters left-to-right, wrap to a new row once a row gets too wide
+  let shelfX = 0, shelfY = 0, shelfMaxH = 0;
+  for (const c of clusters) {
+    if (shelfX > 0 && shelfX + c.width > UNIVERSE_MAX_ROW_WIDTH) {
+      shelfY += shelfMaxH + UNIVERSE_CLUSTER_GAP;
+      shelfX = 0;
+      shelfMaxH = 0;
+    }
+    c.offsetX = shelfX;
+    c.offsetY = shelfY;
+    shelfX += c.width + UNIVERSE_CLUSTER_GAP;
+    shelfMaxH = Math.max(shelfMaxH, c.height);
+  }
+
+  const cardLoc = new Map();
+  for (const c of clusters) {
+    for (const gn of c.gnodes.values()) {
+      if (gn.external) continue;
+      const { x, y } = nodeXY(gn);
+      cardLoc.set(`${c.flowId}::${gn.node.m_cardId}`, { cluster: c, gn, absX: c.offsetX + x, absY: c.offsetY + y });
+    }
+  }
+
+  universeClusters = clusters;
+  universeCardLocation = cardLoc;
+  overlay.style.display = "none";
+  fitUniverseView();
+  scheduleDrawUniverse();
+  drawLegend("universeLegend");
+}
+
+function fitUniverseView() {
+  const rect = document.getElementById("universeWrap").getBoundingClientRect();
+  let maxX = 1, maxY = 1;
+  for (const c of universeClusters) {
+    maxX = Math.max(maxX, c.offsetX + c.width);
+    maxY = Math.max(maxY, c.offsetY + c.height);
+  }
+  uZoom = Math.min(rect.width / maxX, rect.height / maxY) * 0.95;
+  uPanX = (rect.width - maxX * uZoom) / 2;
+  uPanY = (rect.height - maxY * uZoom) / 2;
+}
+
+function scheduleDrawUniverse() {
+  if (uDrawScheduled) return;
+  uDrawScheduled = true;
+  requestAnimationFrame(() => { uDrawScheduled = false; drawUniverse(); });
+}
+
+function drawUniverse() {
+  const canvas = document.getElementById("universeCanvas");
+  const wrap = document.getElementById("universeWrap");
+  const rect = wrap.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const pxW = Math.max(1, Math.round(rect.width * dpr)), pxH = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== pxW || canvas.height !== pxH) {
+    canvas.width = pxW;
+    canvas.height = pxH;
+    canvas.style.width = rect.width + "px";
+    canvas.style.height = rect.height + "px";
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const bgColor = getComputedStyle(document.documentElement).getPropertyValue("--canvas-bg").trim() || "#202225";
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, rect.width, rect.height);
+  if (!universeClusters) return;
+
+  ctx.save();
+  ctx.translate(uPanX, uPanY);
+  ctx.scale(uZoom, uZoom);
+
+  const vx0 = -uPanX / uZoom, vy0 = -uPanY / uZoom;
+  const vx1 = vx0 + rect.width / uZoom, vy1 = vy0 + rect.height / uZoom;
+  const showText = uZoom > UNIVERSE_LOD_TEXT_ZOOM;
+  const showNodes = uZoom > UNIVERSE_LOD_MIN_ZOOM;
+
+  for (const c of universeClusters) {
+    const cx1 = c.offsetX + c.width, cy1 = c.offsetY + c.height;
+    if (cx1 < vx0 || c.offsetX > vx1 || cy1 < vy0 || c.offsetY > vy1) continue; // whole cluster off-screen
+
+    if (showNodes) {
+      ctx.lineWidth = 1.2 / uZoom;
+      for (const e of c.edges) {
+        const a = c.gnodes.get(e.from), b = c.gnodes.get(e.to);
+        if (!a || !b) continue;
+        const ap = nodeXY(a), bp = nodeXY(b);
+        const x1 = c.offsetX + ap.x + NODE_W, y1 = c.offsetY + ap.y + NODE_H / 2;
+        const x2 = c.offsetX + bp.x, y2 = c.offsetY + bp.y + NODE_H / 2;
+        ctx.strokeStyle = e.pinName === "fail" ? "#ed4245" : (e.pinName === "critical_failure" ? "#c246d1" : "#8e929780");
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    } else {
+      // too far zoomed out for individual nodes to matter -- draw one blob for the whole cluster
+      ctx.fillStyle = "#5865f299";
+      ctx.fillRect(c.offsetX, c.offsetY, c.width, c.height);
+      continue;
+    }
+
+    for (const gn of c.gnodes.values()) {
+      const p = nodeXY(gn);
+      const absX = c.offsetX + p.x, absY = c.offsetY + p.y;
+      if (absX + NODE_W < vx0 || absX > vx1 || absY + NODE_H < vy0 || absY > vy1) continue;
+      drawUniverseNode(ctx, gn, c, absX, absY, showText);
+    }
+  }
+  ctx.restore();
+}
+
+function drawUniverseNode(ctx, gn, cluster, x, y, showText) {
+  const isSelected = uSelected && uSelected.gn.key === gn.key && uSelected.cluster === cluster;
+  const dimmed = uConnectedKeys && uSelected.cluster === cluster && !uConnectedKeys.has(gn.key);
+  ctx.globalAlpha = dimmed ? 0.15 : 1;
+  ctx.fillStyle = nodeColor(gn);
+  const r = 5;
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(x, y, NODE_W, NODE_H, r) : ctx.rect(x, y, NODE_W, NODE_H);
+  ctx.fill();
+  if (isSelected) {
+    ctx.lineWidth = 2.5 / uZoom;
+    ctx.strokeStyle = "#ffd166";
+    ctx.stroke();
+  }
+  if (showText && !gn.external) {
+    ctx.fillStyle = "#fff";
+    ctx.font = "10px -apple-system, sans-serif";
+    ctx.textBaseline = "top";
+    const label = summarizeText(gn.node, cluster.nodes);
+    ctx.fillText(truncateToWidth(ctx, label, NODE_W - 8), x + 5, y + 6);
+    ctx.font = "8px -apple-system, sans-serif";
+    ctx.globalAlpha = (dimmed ? 0.15 : 0.7);
+    ctx.fillText(prettyCardType(gn.node), x + 5, y + NODE_H - 14);
+  }
+  ctx.globalAlpha = 1;
+}
+function truncateToWidth(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (ctx.measureText(text.slice(0, mid) + "...").width <= maxWidth) lo = mid; else hi = mid - 1;
+  }
+  return text.slice(0, lo) + "...";
+}
+
+function universeHitTest(worldX, worldY) {
+  for (const c of universeClusters) {
+    if (worldX < c.offsetX || worldX > c.offsetX + c.width || worldY < c.offsetY || worldY > c.offsetY + c.height) continue;
+    for (const gn of c.gnodes.values()) {
+      const p = nodeXY(gn);
+      const absX = c.offsetX + p.x, absY = c.offsetY + p.y;
+      if (worldX >= absX && worldX <= absX + NODE_W && worldY >= absY && worldY <= absY + NODE_H) {
+        return { cluster: c, gn, absX, absY };
+      }
+    }
+  }
+  return null;
+}
+
+function onUniverseNodeSelect(hit) {
+  uSelected = hit;
+  uConnectedKeys = new Set([hit.gn.key]);
+  for (const e of hit.cluster.edges) {
+    if (e.from === hit.gn.key) uConnectedKeys.add(e.to);
+    if (e.to === hit.gn.key) uConnectedKeys.add(e.from);
+  }
+  scheduleDrawUniverse();
+
+  const panel = document.getElementById("detailPanel");
+  panel.style.display = "block";
+  if (hit.gn.external) {
+    const loc = universeCardLocation.get(`${hit.gn.flowId}::${hit.gn.cardId}`);
+    panel.innerHTML = `
+      <span class="closeBtn" onclick="document.getElementById('detailPanel').style.display='none'">&times;</span>
+      <h3>Continues in another conversation</h3>
+      <div class="kv"><b>Conversation:</b> ${escapeHtml(hit.gn.flowId)}</div>
+      ${loc ? `<div style="margin-top:10px"><button id="uJumpBtn" class="branch-btn" style="max-width:none">Fly to that conversation &rarr;</button></div>` : `<div class="alt-note">That target isn't reachable from any conversation's own start card, so it isn't placed anywhere in this view.</div>`}
+    `;
+    if (loc) document.getElementById("uJumpBtn").addEventListener("click", () => flyToUniverseLocation(loc));
+  } else {
+    panel.innerHTML = `
+      <span class="closeBtn" onclick="document.getElementById('detailPanel').style.display='none'">&times;</span>
+      <h3>${escapeHtml(prettyCardType(hit.gn.node))} <span style="font-weight:400;opacity:0.6;font-size:11px">— ${escapeHtml(hit.cluster.flowId)}</span></h3>
+      <div style="margin:8px 0">${cardBodyHtml(hit.gn.node, hit.cluster.nodes)}</div>
+      <details class="raw"><summary>raw node data</summary><pre>${escapeHtml(JSON.stringify(hit.gn.node, null, 1))}</pre></details>
+    `;
+  }
+}
+
+function flyToUniverseLocation(loc) {
+  const rect = document.getElementById("universeWrap").getBoundingClientRect();
+  uZoom = 1;
+  uPanX = rect.width / 2 - (loc.absX + NODE_W / 2) * uZoom;
+  uPanY = rect.height / 2 - (loc.absY + NODE_H / 2) * uZoom;
+  onUniverseNodeSelect(loc);
+}
+
+function universeJumpTarget(hit) {
+  const edge = hit.cluster.edges.find(e => e.from === hit.gn.key);
+  if (!edge) return null;
+  const targetGn = hit.cluster.gnodes.get(edge.to);
+  if (!targetGn) return null;
+  if (!targetGn.external) {
+    const p = nodeXY(targetGn);
+    return { cluster: hit.cluster, gn: targetGn, absX: hit.cluster.offsetX + p.x, absY: hit.cluster.offsetY + p.y };
+  }
+  return universeCardLocation.get(`${targetGn.flowId}::${targetGn.cardId}`) || null;
+}
+
+const universeWrap = document.getElementById("universeWrap");
+let uDragging = false, uDragStart = null, uDragMoved = false;
+universeWrap.addEventListener("mousedown", (e) => {
+  uDragging = true; uDragMoved = false; uDragStart = { x: e.clientX, y: e.clientY, panX: uPanX, panY: uPanY };
+  universeWrap.classList.add("panning");
+});
+window.addEventListener("mousemove", (e) => {
+  if (!uDragging) return;
+  if (Math.abs(e.clientX - uDragStart.x) > 3 || Math.abs(e.clientY - uDragStart.y) > 3) uDragMoved = true;
+  uPanX = uDragStart.panX + (e.clientX - uDragStart.x);
+  uPanY = uDragStart.panY + (e.clientY - uDragStart.y);
+  scheduleDrawUniverse();
+});
+window.addEventListener("mouseup", () => { uDragging = false; universeWrap.classList.remove("panning"); });
+universeWrap.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const rect = universeWrap.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+  const worldX = (mouseX - uPanX) / uZoom, worldY = (mouseY - uPanY) / uZoom;
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  uZoom = Math.min(8, Math.max(0.002, uZoom * factor));
+  uPanX = mouseX - worldX * uZoom;
+  uPanY = mouseY - worldY * uZoom;
+  scheduleDrawUniverse();
+}, { passive: false });
+universeWrap.addEventListener("click", (e) => {
+  if (uDragMoved) return;
+  const rect = universeWrap.getBoundingClientRect();
+  const worldX = (e.clientX - rect.left - uPanX) / uZoom, worldY = (e.clientY - rect.top - uPanY) / uZoom;
+  const hit = universeHitTest(worldX, worldY);
+  if (hit) {
+    onUniverseNodeSelect(hit);
+  } else if (uSelected) {
+    uSelected = null; uConnectedKeys = null;
+    document.getElementById("detailPanel").style.display = "none";
+    scheduleDrawUniverse();
+  }
+});
+universeWrap.addEventListener("dblclick", (e) => {
+  const rect = universeWrap.getBoundingClientRect();
+  const worldX = (e.clientX - rect.left - uPanX) / uZoom, worldY = (e.clientY - rect.top - uPanY) / uZoom;
+  const hit = universeHitTest(worldX, worldY);
+  if (!hit || hit.gn.external) return;
+  const target = universeJumpTarget(hit);
+  if (target) flyToUniverseLocation(target);
+});
+window.addEventListener("resize", () => { if (universeClusters) scheduleDrawUniverse(); });
+
 /* ---------------- mode switching ---------------- */
+function hideAllModeViews() {
+  document.getElementById("graphModeBtn").classList.remove("active");
+  document.getElementById("readerModeBtn").classList.remove("active");
+  document.getElementById("universeModeBtn").classList.remove("active");
+  document.getElementById("graphWrap").style.display = "none";
+  document.getElementById("readerScroll").style.display = "none";
+  document.getElementById("universeWrap").style.display = "none";
+  document.getElementById("detailPanel").style.display = "none";
+}
 document.getElementById("graphModeBtn").addEventListener("click", async () => {
   viewMode = "graph";
+  hideAllModeViews();
   document.getElementById("graphModeBtn").classList.add("active");
-  document.getElementById("readerModeBtn").classList.remove("active");
-  document.getElementById("readerScroll").style.display = "none";
   document.getElementById("graphWrap").style.display = "block";
   document.getElementById("backBtn").style.display = "none";
   document.getElementById("restartBtn").style.display = "none";
   document.getElementById("zoomResetBtn").style.display = "inline-block";
+  document.getElementById("zoomResetBtn").disabled = !currentGraph;
   if (currentFlowId && currentFile) await openGraph(currentFlowId, currentFile);
 });
 document.getElementById("readerModeBtn").addEventListener("click", async () => {
   viewMode = "reader";
+  hideAllModeViews();
   document.getElementById("readerModeBtn").classList.add("active");
-  document.getElementById("graphModeBtn").classList.remove("active");
-  document.getElementById("graphWrap").style.display = "none";
   document.getElementById("readerScroll").style.display = "block";
   document.getElementById("backBtn").style.display = "inline-block";
   document.getElementById("restartBtn").style.display = "inline-block";
   document.getElementById("zoomResetBtn").style.display = "none";
-  document.getElementById("detailPanel").style.display = "none";
   if (currentFlowId && currentFile) await openReaderStart(currentFlowId, currentFile);
+});
+document.getElementById("universeModeBtn").addEventListener("click", async () => {
+  viewMode = "universe";
+  hideAllModeViews();
+  document.getElementById("universeModeBtn").classList.add("active");
+  document.getElementById("universeWrap").style.display = "block";
+  document.getElementById("backBtn").style.display = "none";
+  document.getElementById("restartBtn").style.display = "none";
+  document.getElementById("zoomResetBtn").style.display = "inline-block";
+  document.getElementById("zoomResetBtn").disabled = false;
+  document.getElementById("crumbInfo").textContent = "All conversations";
+  await loadUniverse();
 });
 
 (async function init() {
