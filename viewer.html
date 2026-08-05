@@ -212,9 +212,9 @@
   </div>
   <div id="main">
     <div id="toolbar">
-      <button id="graphModeBtn" class="active">Graph</button>
+      <button id="graphModeBtn">Graph</button>
       <button id="readerModeBtn">Reader</button>
-      <button id="universeModeBtn">All Conversations</button>
+      <button id="universeModeBtn" class="active">All Conversations</button>
       <span style="width:1px;height:16px;background:var(--border)"></span>
       <button id="backBtn" disabled>&larr; Back</button>
       <button id="restartBtn" disabled>&#8635; Restart</button>
@@ -223,13 +223,13 @@
       <span id="crumbInfo"></span>
     </div>
     <div id="viewArea">
-      <div id="placeholder">Pick a flow on the left, or browse by character, to start reading.</div>
+      <div id="placeholder" style="display:none">Pick a flow on the left, or browse by character, to start reading.</div>
       <div id="readerScroll"></div>
-      <div id="graphWrap">
+      <div id="graphWrap" style="display:none">
         <svg id="graphSvg" width="0" height="0"></svg>
         <div id="legend"></div>
       </div>
-      <div id="universeWrap" style="display:none">
+      <div id="universeWrap">
         <canvas id="universeCanvas"></canvas>
         <div id="universeLoading" style="display:none">
           <div id="universeLoadingText">Loading all conversations...</div>
@@ -343,7 +343,7 @@ let flowsIndex = [], characters = [], skills = [];
 let flowFileMap = new Map();
 let currentFile = null, currentChunk = null, currentFlowId = null, currentChunkId = null;
 let historyStack = [];
-let viewMode = "graph";
+let viewMode = "universe";
 let activeFilter = null; // {type: "character"|"skill", value}
 let searchIndex = [];
 let currentTab = "flows";
@@ -652,13 +652,13 @@ async function selectFlow(flowId, file, jumpRid = null) {
     // drop back to the single-conversation Graph view rather than trying to
     // fly to it inside the (possibly not-yet-loaded) universe.
     viewMode = "graph";
-    hideAllModeViews();
-    document.getElementById("graphModeBtn").classList.add("active");
-    document.getElementById("graphWrap").style.display = "block";
     document.getElementById("backBtn").style.display = "none";
     document.getElementById("restartBtn").style.display = "none";
     document.getElementById("zoomResetBtn").style.display = "inline-block";
   }
+  hideAllModeViews();
+  document.getElementById(viewMode === "reader" ? "readerModeBtn" : "graphModeBtn").classList.add("active");
+  document.getElementById(viewMode === "reader" ? "readerScroll" : "graphWrap").style.display = "block";
   if (viewMode === "graph") await openGraph(flowId, file, jumpRid);
   else await openReaderStart(flowId, file, jumpRid);
   // note: openGraph/openReaderStart/navigateTo/onNodeClick each already call
@@ -1274,7 +1274,19 @@ function forceDirectedCharacterLayout(characters, coOccur, iterations = 400) {
       for (let j = i + 1; j < n; j++) {
         let dx = pos[i].x - pos[j].x, dy = pos[i].y - pos[j].y;
         let distSq = dx * dx + dy * dy;
-        if (distSq < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; distSq = 0.01; }
+        if (distSq < 0.01) {
+          // Deterministic nudge, not Math.random() -- this ran non-
+          // deterministically before, so the same data could converge to a
+          // fully-separated layout on one page load and a handful of
+          // residual overlaps on the next (confirmed: local testing showed
+          // zero overlaps, the live site's own separate simulation run
+          // landed on 14). A fixed, index-derived offset breaks the
+          // coincident-position symmetry just as well while making the
+          // whole layout perfectly reproducible.
+          dx = Math.sin(i * 12.9898 + j * 78.233) * 0.5;
+          dy = Math.cos(i * 78.233 + j * 12.9898) * 0.5;
+          distSq = 0.01;
+        }
         const dist = Math.sqrt(distSq);
         const f = REPULSION / distSq;
         const fx = (dx / dist) * f, fy = (dy / dist) * f;
@@ -1320,7 +1332,7 @@ function squarishRowWidth(list) {
   return Math.max(COL_W + COL_GAP, Math.sqrt(totalArea) * 1.3);
 }
 
-function resolveBlockOverlaps(blocks, iterations = 400) {
+function resolveBlockOverlaps(blocks, iterations = 800) {
   // Simple iterative rectangle-separation pass: for each overlapping pair,
   // push both apart (split evenly) along whichever axis has the smaller
   // overlap, so two blocks separate via the shortest path rather than always
@@ -1701,6 +1713,9 @@ function drawUniverseNode(ctx, gn, cluster, x, y, showText) {
     ctx.fillStyle = "#fff";
     ctx.font = "10px -apple-system, sans-serif";
     ctx.textBaseline = "top";
+    ctx.textAlign = "left"; // the screen-space character-label pass sets "center"
+                            // outside any save/restore, so it leaks into the next
+                            // frame's card text unless reset explicitly here
     const label = summarizeText(gn.node, cluster.nodes);
     ctx.fillText(truncateToWidth(ctx, label, NODE_W - 8), x + 5, y + 6);
     ctx.font = "8px -apple-system, sans-serif";
@@ -1840,27 +1855,36 @@ function hideAllModeViews() {
   document.getElementById("readerScroll").style.display = "none";
   document.getElementById("universeWrap").style.display = "none";
   document.getElementById("detailPanel").style.display = "none";
+  document.getElementById("placeholder").style.display = "none";
 }
 document.getElementById("graphModeBtn").addEventListener("click", async () => {
   viewMode = "graph";
   hideAllModeViews();
   document.getElementById("graphModeBtn").classList.add("active");
-  document.getElementById("graphWrap").style.display = "block";
   document.getElementById("backBtn").style.display = "none";
   document.getElementById("restartBtn").style.display = "none";
   document.getElementById("zoomResetBtn").style.display = "inline-block";
   document.getElementById("zoomResetBtn").disabled = !currentGraph;
-  if (currentFlowId && currentFile) await openGraph(currentFlowId, currentFile);
+  if (currentFlowId && currentFile) {
+    document.getElementById("graphWrap").style.display = "block";
+    await openGraph(currentFlowId, currentFile);
+  } else {
+    document.getElementById("placeholder").style.display = "block";
+  }
 });
 document.getElementById("readerModeBtn").addEventListener("click", async () => {
   viewMode = "reader";
   hideAllModeViews();
   document.getElementById("readerModeBtn").classList.add("active");
-  document.getElementById("readerScroll").style.display = "block";
   document.getElementById("backBtn").style.display = "inline-block";
   document.getElementById("restartBtn").style.display = "inline-block";
   document.getElementById("zoomResetBtn").style.display = "none";
-  if (currentFlowId && currentFile) await openReaderStart(currentFlowId, currentFile);
+  if (currentFlowId && currentFile) {
+    document.getElementById("readerScroll").style.display = "block";
+    await openReaderStart(currentFlowId, currentFile);
+  } else {
+    document.getElementById("placeholder").style.display = "block";
+  }
 });
 document.getElementById("universeModeBtn").addEventListener("click", async () => {
   viewMode = "universe";
@@ -1891,8 +1915,10 @@ document.getElementById("universeModeBtn").addEventListener("click", async () =>
     viewMode = shared.mode === "reader" ? "reader" : "graph";
     document.getElementById(viewMode === "reader" ? "readerModeBtn" : "graphModeBtn").classList.add("active");
     document.getElementById(viewMode === "reader" ? "graphModeBtn" : "readerModeBtn").classList.remove("active");
+    document.getElementById("universeModeBtn").classList.remove("active");
     document.getElementById("readerScroll").style.display = viewMode === "reader" ? "block" : "none";
     document.getElementById("graphWrap").style.display = viewMode === "reader" ? "none" : "block";
+    document.getElementById("universeWrap").style.display = "none";
     document.getElementById("backBtn").style.display = viewMode === "reader" ? "inline-block" : "none";
     document.getElementById("restartBtn").style.display = viewMode === "reader" ? "inline-block" : "none";
     document.getElementById("zoomResetBtn").style.display = viewMode === "reader" ? "none" : "inline-block";
@@ -1901,6 +1927,10 @@ document.getElementById("universeModeBtn").addEventListener("click", async () =>
     } catch (e) {
       console.error("failed to restore shared link", e);
     }
+  } else {
+    // no specific shared link -- land on the "All Conversations" atlas by default
+    document.getElementById("crumbInfo").textContent = "All conversations";
+    await loadUniverse();
   }
 })();
 </script>
