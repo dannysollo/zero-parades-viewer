@@ -1,0 +1,1199 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Zero Parades — Dialogue Viewer</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #2b2d31; --border: #3f4147; --text: #dcddde;
+    --muted: #8e9297; --accent: #5865f2; --accent-text: #ffffff;
+    --card-bg: #313338; --tag-bg: #3f4147; --canvas-bg: #202225;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f2f3f5; --panel: #ffffff; --border: #d4d7dc; --text: #1e1f22;
+      --muted: #5c6067; --accent: #5865f2; --accent-text: #ffffff;
+      --card-bg: #ffffff; --tag-bg: #e3e5e8; --canvas-bg: #e9eaed;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
+  }
+  #app { display: flex; height: 100vh; }
+  #sidebar {
+    width: 380px; min-width: 260px; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; background: var(--panel);
+  }
+  #tabs { display: flex; border-bottom: 1px solid var(--border); }
+  #tabs button {
+    flex: 1; padding: 9px 4px; background: none; border: none; color: var(--muted);
+    font-size: 11px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  #tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+  #search { padding: 10px; border-bottom: 1px solid var(--border); }
+  #search input {
+    width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 13px;
+  }
+  #stats { padding: 6px 12px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  #filterChip {
+    margin: 8px 10px 0 10px; padding: 5px 10px; border-radius: 6px; background: var(--accent);
+    color: var(--accent-text); font-size: 11.5px; display: none; align-items: center; justify-content: space-between;
+  }
+  #filterChip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; font-weight: 700; }
+
+  #flowList, #charList, #skillList, #searchResults { flex: 1; overflow-y: auto; }
+  .flow-item, .char-item, .skill-item, .search-item {
+    padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12.5px;
+  }
+  .flow-item:hover, .char-item:hover, .skill-item:hover, .search-item:hover { background: var(--tag-bg); }
+  .flow-item.active { background: var(--accent); color: var(--accent-text); }
+  .flow-item .fid { font-family: monospace; font-size: 11px; opacity: 0.7; }
+  .flow-item .prev { margin-top: 2px; opacity: 0.85; }
+  .flow-item .chip { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--tag-bg); margin-right: 4px; }
+  .flow-item.active .chip { background: rgba(255,255,255,0.25); }
+  .char-item, .skill-item { display: flex; justify-content: space-between; align-items: center; }
+  .char-item .name, .skill-item .name { font-weight: 600; }
+  .char-item .count, .skill-item .count { font-size: 11px; color: var(--muted); }
+  .search-item .sspeaker { font-weight: 700; font-size: 12px; }
+  .search-item .stext { margin-top: 2px; opacity: 0.9; }
+  .search-item .stext mark { background: #ffd166; color: #1a1a1a; border-radius: 2px; }
+  .search-item .smeta { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+  #toolbar {
+    padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;
+    font-size: 12.5px; color: var(--muted); flex-wrap: wrap;
+  }
+  #toolbar button {
+    padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel);
+    color: var(--text); cursor: pointer; font-size: 12px;
+  }
+  #toolbar button:hover { background: var(--tag-bg); }
+  #toolbar button:disabled { opacity: 0.4; cursor: default; }
+  #toolbar button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  #viewArea { flex: 1; position: relative; overflow: hidden; }
+  #placeholder { color: var(--muted); padding: 40px; text-align: center; }
+
+  /* Reader mode */
+  #readerScroll { position: absolute; inset: 0; overflow-y: auto; padding: 20px 24px; display: none; }
+  .card {
+    max-width: 720px; margin: 0 auto 14px auto; padding: 14px 16px; border-radius: 10px;
+    background: var(--card-bg); border: 1px solid var(--border);
+  }
+  .card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .badge {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em;
+    padding: 2px 7px; border-radius: 5px; background: var(--tag-bg); color: var(--muted); font-weight: 600;
+  }
+  .badge.bark, .badge.dialog-fragment, .badge.janus-card { background: var(--accent); color: var(--accent-text); }
+  .badge.start, .badge.end { background: #3ba55d; color: white; }
+  .badge.fork { background: #faa61a; color: #222; }
+  .badge.hub { background: #949cf7; color: #1a1a2e; }
+  .badge.jump { background: #ed4245; color: white; }
+  .cardid { font-family: monospace; font-size: 10.5px; color: var(--muted); }
+  .speaker { font-weight: 700; font-size: 13px; margin-bottom: 3px; }
+  .line { font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+  .alt-note { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .kv { font-size: 12px; margin: 2px 0; }
+  .kv b { color: var(--muted); font-weight: 600; }
+  .branches { max-width: 720px; margin: 0 auto 20px auto; display: flex; flex-direction: column; gap: 6px; }
+  .branch-btn {
+    text-align: left; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); cursor: pointer; font-size: 13px;
+  }
+  .branch-btn:hover { border-color: var(--accent); }
+  .branch-btn .pin { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-right: 6px; }
+  details.raw { max-width: 720px; margin: 0 auto 20px auto; }
+  details.raw summary { cursor: pointer; font-size: 11.5px; color: var(--muted); }
+  details.raw pre {
+    font-size: 11px; background: var(--tag-bg); padding: 10px; border-radius: 6px; overflow-x: auto; max-height: 300px;
+  }
+  .deadend { max-width: 720px; margin: 0 auto; text-align: center; color: var(--muted); font-size: 13px; padding: 10px; }
+  .checkinfo { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .condition-text { font-size: 13px; color: var(--muted); margin-top: 8px; font-style: italic; }
+  .modifiers { margin-top: 6px; }
+  .mod-row { font-size: 11.5px; margin: 2px 0; }
+  .mod-pos { color: #3ba55d; font-weight: 700; }
+  .mod-neg { color: #ed4245; font-weight: 700; }
+  .mod-neu { color: var(--muted); font-weight: 700; }
+
+  /* Graph mode */
+  #graphWrap { position: absolute; inset: 0; overflow: hidden; background: var(--canvas-bg); cursor: grab; }
+  #graphWrap.panning { cursor: grabbing; }
+  #graphSvg { position: absolute; top: 0; left: 0; }
+  .gnode-box {
+    border-radius: 8px; border: 2px solid var(--border); background: var(--card-bg);
+    width: 100%; height: 100%; padding: 6px 8px; font-size: 11px; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: flex-start; cursor: pointer;
+  }
+  .gnode-box.selected { border-color: #ffd166; box-shadow: 0 0 0 2px #ffd16688; }
+  .gnode-box.highlight { border-color: #ffd166; }
+  .gnode-box.dimmed { opacity: 0.18; }
+  .gnode-box .gtype {
+    font-size: 8.5px; text-transform: uppercase; font-weight: 700; opacity: 0.7; margin-bottom: 2px;
+  }
+  .gnode-box .gspeaker { font-weight: 700; font-size: 10.5px; }
+  .gnode-box .gtext {
+    font-size: 10.5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .gnode-box.type-start, .gnode-box.type-end { background: #1f4a2f; border-color: #3ba55d; }
+  .gnode-box.type-bark, .gnode-box.type-frag, .gnode-box.type-janus { background: #2b2d5c; border-color: var(--accent); }
+  .gnode-box.type-fork { background: #4a3a12; border-color: #faa61a; }
+  .gnode-box.type-hub { background: #35335c; border-color: #949cf7; }
+  .gnode-box.type-jump { background: #4a1f22; border-color: #ed4245; }
+  .gnode-box.type-passive { background: #1f4a3a; border-color: #3ba57a; }
+  .gnode-box.type-antipassive { background: #4a2530; border-color: #d1495b; }
+  .gnode-box.type-check { background: #3a3d42; border-color: #9aa0a6; }
+  .gnode-box.type-external { background: transparent; border-style: dashed; opacity: 0.8; }
+  .gnode-box .gskill { font-size: 9.5px; opacity: 0.85; margin-top: 2px; }
+  .gnode-box .gcondition {
+    font-size: 9px; opacity: 0.85; margin-top: 2px; font-style: italic;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  @media (prefers-color-scheme: light) {
+    .gnode-box.type-start, .gnode-box.type-end { background: #d7f2df; }
+    .gnode-box.type-bark, .gnode-box.type-frag, .gnode-box.type-janus { background: #e1e2fb; }
+    .gnode-box.type-fork { background: #ffedcf; }
+    .gnode-box.type-hub { background: #e6e6fb; }
+    .gnode-box.type-jump { background: #fbdada; }
+    .gnode-box.type-passive { background: #d8f2e6; }
+    .gnode-box.type-antipassive { background: #f9dde1; }
+    .gnode-box.type-check { background: #e4e5e7; }
+  }
+
+  #detailPanel {
+    position: absolute; top: 12px; right: 12px; width: 320px; max-height: calc(100% - 24px);
+    overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.25); display: none; z-index: 10;
+  }
+  #detailPanel h3 { margin: 0 0 6px 0; font-size: 13px; }
+  #detailPanel .closeBtn { float: right; cursor: pointer; color: var(--muted); font-weight: 700; }
+  #detailPanel pre { font-size: 10.5px; background: var(--tag-bg); padding: 8px; border-radius: 6px; overflow-x: auto; max-height: 240px; }
+  #legend {
+    position: absolute; bottom: 12px; left: 12px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 10.5px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap;
+    max-width: 320px;
+  }
+  #legend span { display: flex; align-items: center; gap: 4px; }
+  #legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="tabs">
+      <button id="tabFlows" class="active">Flows</button>
+      <button id="tabChars">Characters</button>
+      <button id="tabSkills">Skills</button>
+      <button id="tabSearch">Search</button>
+    </div>
+    <div id="search"><input id="searchBox" placeholder="Search flows (id / speaker / text)..." /></div>
+    <div id="filterChip"><span id="filterChipText"></span><button id="clearFilter">&times;</button></div>
+    <div id="stats"></div>
+    <div id="flowList"></div>
+    <div id="charList" style="display:none"></div>
+    <div id="skillList" style="display:none"></div>
+    <div id="searchResults" style="display:none"></div>
+  </div>
+  <div id="main">
+    <div id="toolbar">
+      <button id="graphModeBtn" class="active">Graph</button>
+      <button id="readerModeBtn">Reader</button>
+      <span style="width:1px;height:16px;background:var(--border)"></span>
+      <button id="backBtn" disabled>&larr; Back</button>
+      <button id="restartBtn" disabled>&#8635; Restart</button>
+      <button id="zoomResetBtn" disabled>Reset zoom</button>
+      <button id="copyLinkBtn" title="Copy a link to this exact view">&#128279; Copy link</button>
+      <span id="crumbInfo"></span>
+    </div>
+    <div id="viewArea">
+      <div id="placeholder">Pick a flow on the left, or browse by character, to start reading.</div>
+      <div id="readerScroll"></div>
+      <div id="graphWrap">
+        <svg id="graphSvg" width="0" height="0"></svg>
+        <div id="legend"></div>
+      </div>
+      <div id="detailPanel"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TEXT_TYPES = new Set(["RtBarkCard", "RtC4DialogueFragmentCard", "RtJanusCard"]);
+const CHECK_TYPES = new Set(["RtPassiveCard", "RtAntiPassiveCard", "RtWhiteCheckCard", "RtRedCheckCard"]);
+const SKILL_NAMES = {
+  coordination: "Coordination", inference: "Inference", nerve: "Nerve", wits: "Wits",
+  entanglement: "Entanglement", inspiration: "Inspiration", affect: "Affect", presence: "Presence",
+  awareness: "Awareness", motivation: "Motivation", recall: "Recall", focus: "Focus",
+  vigour: "Vigour", muscle: "Muscle", senses: "Senses",
+};
+function prettySkill(id) {
+  if (!id) return null;
+  return SKILL_NAMES[id] || (id.charAt(0).toUpperCase() + id.slice(1));
+}
+function prettyCardType(node) {
+  const t = node.m_cardType || node.type;
+  return t.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+function hasDialogueText(node, nodes) {
+  const cd = cardDataMap(node);
+  return cd.dialog_lines !== undefined || cd.description !== undefined;
+}
+function resolveModifiers(nodes, modifierRid) {
+  // modifier -> RtPropertyGroupData.m_childProperties[] -> each a group of {bonus, condition, explanation}
+  const group = nodes[String(modifierRid)];
+  if (!group || !group.m_childProperties) return [];
+  const out = [];
+  for (const ref of group.m_childProperties) {
+    const sub = nodes[String(ref.rid)];
+    if (!sub || !sub.m_childProperties) continue;
+    let bonus = null, explanation = null;
+    for (const propRef of sub.m_childProperties) {
+      const prop = nodes[String(propRef.rid)];
+      if (!prop) continue;
+      if (prop.m_name === "bonus") bonus = prop.m_value;
+      else if (prop.m_name === "explanation") explanation = prop.m_value;
+    }
+    if (bonus !== null || explanation) out.push({ bonus, explanation });
+  }
+  return out;
+}
+function checkInfoHtml(node, nodes) {
+  if (!CHECK_TYPES.has(node.type)) return "";
+  const parts = [];
+  const skill = prettySkill(node.m_skillID);
+  if (skill) parts.push(`<b>Skill:</b> ${escapeHtml(skill)}`);
+  if (node.m_threshold !== undefined) parts.push(`<b>Difficulty:</b> ${escapeHtml(String(node.m_threshold))}`);
+  let html = parts.length ? `<div class="checkinfo">${parts.join(" &nbsp;·&nbsp; ")}</div>` : "";
+  const cd = cardDataMap(node);
+  if (cd.modifier) {
+    const mods = resolveModifiers(nodes, cd.modifier.rid);
+    if (mods.length) {
+      html += `<div class="modifiers">` + mods.map(m => {
+        const sign = m.bonus > 0 ? "+" : "";
+        const cls = m.bonus > 0 ? "mod-pos" : (m.bonus < 0 ? "mod-neg" : "mod-neu");
+        return `<div class="mod-row"><span class="${cls}">${sign}${m.bonus ?? "?"}</span>${m.explanation ? " " + escapeHtml(m.explanation) : ""}</div>`;
+      }).join("") + `</div>`;
+    }
+  }
+  return html;
+}
+function prettyGateName(hookName) {
+  const short = (hookName || "").replace(/^gates\./, "").replace(/^instructions\./, "");
+  return short.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+}
+function resolveCondition(nodes, rid, depth = 0) {
+  if (rid === undefined || rid === null || rid == -2 || depth > 12) return null;
+  const node = nodes[String(rid)];
+  if (!node) return null;
+  switch (node.type) {
+    case "RtStructuredConditionPropertyData":
+      return resolveCondition(nodes, node.m_condition ? node.m_condition.rid : null, depth + 1);
+    case "RtStructuredConditionLogicalAND":
+      return (node.m_children || []).map(c => resolveCondition(nodes, c.rid, depth + 1) || "?").join(" AND ");
+    case "RtStructuredConditionLogicalOR":
+      return "(" + (node.m_children || []).map(c => resolveCondition(nodes, c.rid, depth + 1) || "?").join(" OR ") + ")";
+    case "RtStructuredConditionLogicalNOT": {
+      const child = (node.m_children || [])[0];
+      return "NOT " + (child ? (resolveCondition(nodes, child.rid, depth + 1) || "?") : "?");
+    }
+    case "RtStructuredConditionFlag":
+      return `Flag Set(${node.m_flagName || "?"})`;
+    case "RtStructuredConditionHook": {
+      const call = node.m_hookCall || {};
+      const args = (call.m_args || []).map(a => resolveLeaf(nodes, a.rid));
+      const argStr = args.map(a => a === null ? "?" : a).join(", ");
+      return `${prettyGateName(call.m_hookName)}(${argStr})`;
+    }
+    default:
+      return null;
+  }
+}
+function forkConditionText(node, nodes) {
+  const cd = cardDataMap(node);
+  const condRef = cd.structured_condition || cd.condition;
+  if (!condRef) return null;
+  return resolveCondition(nodes, condRef.rid);
+}
+const chunkCache = new Map();
+let flowsIndex = [], characters = [], skills = [];
+let flowFileMap = new Map();
+let currentFile = null, currentChunk = null, currentFlowId = null, currentChunkId = null;
+let historyStack = [];
+let viewMode = "graph";
+let activeFilter = null; // {type: "character"|"skill", value}
+let searchIndex = [];
+let currentTab = "flows";
+
+async function loadJSON(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`fetch failed: ${path} (${res.status})`);
+  return res.json();
+}
+async function getChunk(file) {
+  if (chunkCache.has(file)) return chunkCache.get(file);
+  const data = await loadJSON(file);
+  chunkCache.set(file, data);
+  return data;
+}
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function resolveLeaf(nodes, rid) {
+  if (rid === undefined || rid === null || rid == -2) return null;
+  const node = nodes[String(rid)];
+  if (!node) return null;
+  if (["RtStringPropertyData","RtWritableStringPropertyData","RtIntPropertyData","RtWritableIntPropertyData","RtBoolPropertyData","RtWritableBoolPropertyData"].includes(node.type)) return node.m_value;
+  return null;
+}
+function cardDataMap(node) {
+  const out = {};
+  const cd = node.m_cardData || {};
+  const keys = cd.m_keys || [], values = cd.m_values || [];
+  for (let i = 0; i < keys.length; i++) out[keys[i]] = values[i];
+  return out;
+}
+function speakerAndText(node, nodes) {
+  const cd = cardDataMap(node);
+  const text = resolveLeaf(nodes, (cd.dialog_lines || {}).rid) || resolveLeaf(nodes, (cd.description || {}).rid);
+  const speaker = resolveLeaf(nodes, (cd.character_short_name || {}).rid);
+  return { speaker, text };
+}
+function nodeTypeClass(node) {
+  if (!node) return "external";
+  if (node.type === "RtStartCard") return "start";
+  if (node.type === "RtEndCard") return "end";
+  if (node.type === "RtC4ForkCard") return "fork";
+  if (node.type === "RtC4HubCard") return "hub";
+  if (node.type === "RtC4JumpCard") return "jump";
+  if (node.type === "RtPassiveCard") return "passive";
+  if (node.type === "RtAntiPassiveCard") return "antipassive";
+  if (node.type === "RtWhiteCheckCard" || node.type === "RtRedCheckCard") return "check";
+  if (hasDialogueText(node)) {
+    if (node.type === "RtJanusCard") return "janus";
+    if (node.type === "RtBarkCard") return "bark";
+    return "frag";
+  }
+  return "other";
+}
+function cardBodyHtml(node, nodes) {
+  const cd = cardDataMap(node);
+  if (hasDialogueText(node)) {
+    const { speaker, text } = speakerAndText(node, nodes);
+    const altCount = resolveLeaf(nodes, (cd.alternativesCount || {}).rid);
+    let html = speaker ? `<div class="speaker">${escapeHtml(speaker)}</div>` : "";
+    html += `<div class="line">${escapeHtml(text || "(no text)")}</div>`;
+    if (altCount) html += `<div class="alt-note">+${altCount} conditional alternative line(s) not shown</div>`;
+    html += checkInfoHtml(node, nodes);
+    return html;
+  }
+  if (node.type === "RtStartCard") return `<div class="line" style="color:var(--muted)">— start of flow —</div>`;
+  if (node.type === "RtEndCard") return `<div class="line" style="color:var(--muted)">— end of flow —</div>`;
+  if (node.type === "RtC4ForkCard") {
+    const condText = forkConditionText(node, nodes);
+    return `<div class="line" style="color:var(--muted)">Condition check (branches: pass / fail)</div>` +
+      (condText ? `<div class="condition-text">IF ${escapeHtml(condText)}</div>` : `<div class="alt-note">(condition not resolvable)</div>`);
+  }
+  if (node.type === "RtC4HubCard") return `<div class="line" style="color:var(--muted)">Hub (checkpoint / convergence point)</div>`;
+  if (node.type === "RtC4JumpCard") return `<div class="line" style="color:var(--muted)">Jump &rarr;</div>`;
+  if (node.type === "RtFlowReferenceCard") return `<div class="line" style="color:var(--muted)">Flow reference (dynamic property <code>${escapeHtml(node.m_flowPropertyID || "?")}</code>)</div>`;
+  let kvHtml = "";
+  for (const [k, v] of Object.entries(cd)) {
+    const resolved = resolveLeaf(nodes, (v || {}).rid);
+    kvHtml += `<div class="kv"><b>${escapeHtml(k)}:</b> ${resolved !== null ? escapeHtml(String(resolved)) : `<i>(complex, see raw)</i>`}</div>`;
+  }
+  return kvHtml || `<div class="line" style="color:var(--muted)">(no card data)</div>`;
+}
+function summarizeText(node, nodes) {
+  const { speaker, text } = hasDialogueText(node) ? speakerAndText(node, nodes) : {};
+  const t = (text || "").slice(0, 60);
+  let label = speaker ? `${speaker}: ${t}` : (t || prettyCardType(node));
+  if (CHECK_TYPES.has(node.type)) {
+    const skill = prettySkill(node.m_skillID);
+    if (skill) label += ` [${skill}]`;
+  }
+  return label;
+}
+
+/* ---------------- sidebar: flows tab ---------------- */
+async function renderFlowList(filter) {
+  const listEl = document.getElementById("flowList");
+  const q = (filter || "").toLowerCase().trim();
+  let base = flowsIndex;
+  if (activeFilter?.type === "character") base = base.filter(f => (f.speakers || []).includes(activeFilter.value));
+  const filtered = q
+    ? base.filter(f =>
+        f.flowId.toLowerCase().includes(q) ||
+        (f.speaker && f.speaker.toLowerCase().includes(q)) ||
+        (f.preview && f.preview.toLowerCase().includes(q)) ||
+        f.chunkId.toLowerCase().includes(q))
+    : base;
+
+  document.getElementById("stats").textContent = `${filtered.length} / ${flowsIndex.length} flows`;
+  listEl.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const f of filtered.slice(0, 500)) {
+    const div = document.createElement("div");
+    div.className = "flow-item";
+    div.dataset.flowId = f.flowId;
+    div.dataset.file = f.file;
+    div.innerHTML = `
+      <div><span class="chip">${f.cardCount} cards</span><span class="fid">${f.flowId}</span></div>
+      ${f.speaker ? `<div class="prev"><b>${f.speaker}:</b> ${escapeHtml(f.preview || "")}</div>` : (f.preview ? `<div class="prev">${escapeHtml(f.preview)}</div>` : `<div class="prev" style="opacity:0.5">(no text preview)</div>`)}
+    `;
+    div.addEventListener("click", () => selectFlow(f.flowId, f.file));
+    frag.appendChild(div);
+  }
+  listEl.appendChild(frag);
+}
+
+/* ---------------- sidebar: characters tab ---------------- */
+function renderCharList(filter) {
+  const listEl = document.getElementById("charList");
+  const q = (filter || "").toLowerCase().trim();
+  const filtered = q ? characters.filter(c => c.character.toLowerCase().includes(q)) : characters;
+  document.getElementById("stats").textContent = `${filtered.length} / ${characters.length} characters`;
+  listEl.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const c of filtered) {
+    const div = document.createElement("div");
+    div.className = "char-item";
+    div.innerHTML = `<span class="name">${escapeHtml(c.character)}</span><span class="count">${c.totalLines} lines · ${c.flowCount} flows</span>`;
+    div.addEventListener("click", () => selectCharacter(c.character));
+    frag.appendChild(div);
+  }
+  listEl.appendChild(frag);
+}
+
+/* ---------------- sidebar: skills tab ---------------- */
+function renderSkillList(filter) {
+  const listEl = document.getElementById("skillList");
+  const q = (filter || "").toLowerCase().trim();
+  const filtered = q ? skills.filter(s => s.skill.toLowerCase().includes(q)) : skills;
+  document.getElementById("stats").textContent = `${filtered.length} / ${skills.length} skills`;
+  listEl.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const s of filtered) {
+    const div = document.createElement("div");
+    div.className = "skill-item";
+    div.innerHTML = `<span class="name">${escapeHtml(prettySkill(s.skill))}</span><span class="count">${s.totalChecks} checks · ${s.flowCount} flows</span>`;
+    div.addEventListener("click", () => renderSkillChecks(s.skill));
+    frag.appendChild(div);
+  }
+  listEl.appendChild(frag);
+}
+function renderSkillChecks(skillId) {
+  const listEl = document.getElementById("skillList");
+  listEl.innerHTML = "";
+  const back = document.createElement("div");
+  back.className = "search-item";
+  back.style.fontWeight = "700";
+  back.textContent = "← Back to skills";
+  back.addEventListener("click", () => renderSkillList(""));
+  listEl.appendChild(back);
+
+  if (searchIndex.length === 0) {
+    document.getElementById("stats").textContent = "Loading check data...";
+    const note = document.createElement("div");
+    note.className = "search-item";
+    note.textContent = "Still loading the full dialogue index — try again in a moment.";
+    listEl.appendChild(note);
+    return;
+  }
+
+  const matches = searchIndex.filter(e => e.sk === skillId);
+  document.getElementById("stats").textContent = `${matches.length} ${prettySkill(skillId)} checks`;
+  const frag = document.createDocumentFragment();
+  for (const m of matches) {
+    const div = document.createElement("div");
+    div.className = "search-item";
+    div.innerHTML = `
+      ${m.s ? `<div class="sspeaker">${escapeHtml(m.s)}</div>` : ""}
+      <div class="stext">${escapeHtml(m.t)}</div>
+      <div class="smeta">${escapeHtml(m.ty)}</div>
+    `;
+    div.addEventListener("click", () => jumpToCard(m.fl, m.f, m.r));
+    frag.appendChild(div);
+  }
+  listEl.appendChild(frag);
+}
+
+/* ---------------- sidebar: full-text search tab ---------------- */
+function highlightMatch(text, q) {
+  if (!q) return escapeHtml(text);
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return escapeHtml(text);
+  return escapeHtml(text.slice(0, idx)) + "<mark>" + escapeHtml(text.slice(idx, idx + q.length)) + "</mark>" + escapeHtml(text.slice(idx + q.length));
+}
+function renderSearchResults(query) {
+  const listEl = document.getElementById("searchResults");
+  const q = (query || "").trim();
+  if (q.length < 2) {
+    document.getElementById("stats").textContent = `Type at least 2 characters to search ${searchIndex.length} lines`;
+    listEl.innerHTML = "";
+    return;
+  }
+  const ql = q.toLowerCase();
+  const matches = [];
+  for (const e of searchIndex) {
+    if (e.t.toLowerCase().includes(ql) || (e.s && e.s.toLowerCase().includes(ql))) {
+      matches.push(e);
+      if (matches.length >= 300) break;
+    }
+  }
+  document.getElementById("stats").textContent = `${matches.length}${matches.length >= 300 ? "+" : ""} matches (of ${searchIndex.length} lines)`;
+  listEl.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const m of matches) {
+    const div = document.createElement("div");
+    div.className = "search-item";
+    const skillTag = m.sk ? ` · <span style="opacity:0.7">${escapeHtml(prettySkill(m.sk))}</span>` : "";
+    div.innerHTML = `
+      ${m.s ? `<div class="sspeaker">${escapeHtml(m.s)}</div>` : ""}
+      <div class="stext">${highlightMatch(m.t, q)}</div>
+      <div class="smeta">${escapeHtml(m.ty)}${skillTag}</div>
+    `;
+    div.addEventListener("click", () => jumpToCard(m.fl, m.f, m.r));
+    frag.appendChild(div);
+  }
+  listEl.appendChild(frag);
+}
+
+function selectCharacter(character) {
+  activeFilter = { type: "character", value: character };
+  document.getElementById("filterChip").style.display = "flex";
+  document.getElementById("filterChipText").textContent = `Character: ${character}`;
+  switchTab("flows");
+  document.getElementById("searchBox").value = "";
+  renderFlowList("");
+  if (currentGraph) drawGraph(); // re-highlight if a graph is open
+}
+document.getElementById("clearFilter").addEventListener("click", () => {
+  activeFilter = null;
+  document.getElementById("filterChip").style.display = "none";
+  renderFlowList(document.getElementById("searchBox").value);
+  if (currentGraph) drawGraph();
+});
+
+const TAB_CONFIG = {
+  flows: { btn: "tabFlows", list: "flowList", placeholder: "Search flows (id / speaker / text)...", render: renderFlowList },
+  chars: { btn: "tabChars", list: "charList", placeholder: "Search characters...", render: renderCharList },
+  skills: { btn: "tabSkills", list: "skillList", placeholder: "Search skills...", render: renderSkillList },
+  search: { btn: "tabSearch", list: "searchResults", placeholder: "Search all dialogue lines...", render: renderSearchResults },
+};
+function switchTab(name) {
+  currentTab = name;
+  for (const [key, cfg] of Object.entries(TAB_CONFIG)) {
+    document.getElementById(cfg.btn).classList.toggle("active", key === name);
+    document.getElementById(cfg.list).style.display = key === name ? "block" : "none";
+  }
+  document.getElementById("searchBox").placeholder = TAB_CONFIG[name].placeholder;
+  document.getElementById("searchBox").value = "";
+  TAB_CONFIG[name].render("");
+}
+for (const [key, cfg] of Object.entries(TAB_CONFIG)) {
+  document.getElementById(cfg.btn).addEventListener("click", () => switchTab(key));
+}
+document.getElementById("searchBox").addEventListener("input", (e) => TAB_CONFIG[currentTab].render(e.target.value));
+
+/* ---------------- flow selection / shared state ---------------- */
+async function resolveCardTarget(cardId, flowId) {
+  let chunk = currentChunk, file = currentFile;
+  if (!chunk.flows[flowId]) {
+    const targetFile = flowFileMap.get(flowId);
+    if (!targetFile) return null;
+    file = targetFile;
+    chunk = await getChunk(targetFile);
+  }
+  const rid = (chunk.flows[flowId] || {})[cardId];
+  if (rid === undefined) return null;
+  const node = chunk.nodes[String(rid)];
+  if (!node) return null;
+  return { file, rid: String(rid), nodes: chunk.nodes, node };
+}
+
+async function selectFlow(flowId, file, jumpRid = null) {
+  currentChunk = await getChunk(file);
+  currentFile = file;
+  currentFlowId = flowId;
+  currentChunkId = currentChunk.chunkId;
+
+  document.querySelectorAll(".flow-item").forEach(el => {
+    el.classList.toggle("active", el.dataset.flowId === flowId && el.dataset.file === file);
+  });
+  document.getElementById("placeholder").style.display = "none";
+  document.getElementById("crumbInfo").textContent = `${currentChunkId} — ${currentFlowId}`;
+
+  if (viewMode === "graph") await openGraph(flowId, file, jumpRid);
+  else await openReaderStart(flowId, file, jumpRid);
+  // note: openGraph/openReaderStart/navigateTo/onNodeClick each already call
+  // updateHash() themselves with the right node context — nothing to do here.
+}
+
+/* ---------------- shareable links (URL hash) ---------------- */
+function updateHash(node) {
+  const params = new URLSearchParams();
+  params.set("m", viewMode);
+  if (currentFile) params.set("f", currentFile);
+  if (currentFlowId) params.set("fl", currentFlowId);
+  if (node) params.set("n", node);
+  history.replaceState(null, "", "#" + params.toString());
+}
+function parseHash() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const file = params.get("f"), flowId = params.get("fl");
+  if (!file || !flowId) return null;
+  return { mode: params.get("m") || "graph", file, flowId, node: params.get("n") || null };
+}
+async function jumpToCard(flowId, file, rid) {
+  await selectFlow(flowId, file, rid);
+}
+document.getElementById("copyLinkBtn").addEventListener("click", () => {
+  navigator.clipboard.writeText(location.href).then(() => {
+    const btn = document.getElementById("copyLinkBtn");
+    const orig = btn.innerHTML;
+    btn.innerHTML = "Copied!";
+    setTimeout(() => { btn.innerHTML = orig; }, 1200);
+  });
+});
+
+/* ================= READER MODE ================= */
+async function openReaderStart(flowId, file, jumpRid = null) {
+  if (jumpRid) {
+    historyStack = [];
+    await navigateTo(file, jumpRid);
+    return;
+  }
+  const cardMap = currentChunk.flows[flowId] || {};
+  let startRid = null;
+  for (const [cardId, rid] of Object.entries(cardMap)) {
+    const node = currentChunk.nodes[String(rid)];
+    if (node && node.type === "RtStartCard") { startRid = rid; break; }
+  }
+  if (startRid === null) startRid = Object.values(cardMap)[0] ?? null;
+  historyStack = [];
+  if (startRid !== null) await navigateTo(file, startRid);
+  else document.getElementById("readerScroll").innerHTML = `<div class="deadend">No cards found for this flow.</div>`;
+}
+async function navigateTo(file, rid, pushHistory = true) {
+  if (file !== currentFile) { currentChunk = await getChunk(file); currentFile = file; }
+  const key = `${file}::${rid}`;
+  if (pushHistory) {
+    const top = historyStack[historyStack.length - 1];
+    if (!top || `${top.file}::${top.rid}` !== key) historyStack.push({ file, rid });
+  }
+  await renderReaderCard(rid);
+  document.getElementById("backBtn").disabled = historyStack.length <= 1;
+  document.getElementById("restartBtn").disabled = false;
+  const node = currentChunk.nodes[String(rid)];
+  currentFlowId = node ? node.m_flowId : currentFlowId;
+  currentChunkId = currentChunk.chunkId;
+  document.getElementById("crumbInfo").textContent = `${currentChunkId} — ${currentFlowId} — step ${historyStack.length}`;
+  updateHash(rid);
+}
+document.getElementById("backBtn").addEventListener("click", async () => {
+  if (historyStack.length > 1) {
+    historyStack.pop();
+    const prev = historyStack[historyStack.length - 1];
+    await navigateTo(prev.file, prev.rid, false);
+    document.getElementById("backBtn").disabled = historyStack.length <= 1;
+  }
+});
+document.getElementById("restartBtn").addEventListener("click", async () => {
+  if (historyStack.length) {
+    const first = historyStack[0];
+    historyStack = [first];
+    await navigateTo(first.file, first.rid, false);
+    document.getElementById("backBtn").disabled = true;
+  }
+});
+
+async function renderReaderCard(rid) {
+  const nodes = currentChunk.nodes;
+  const node = nodes[String(rid)];
+  const scriptEl = document.getElementById("readerScroll");
+  scriptEl.innerHTML = "";
+  if (!node) { scriptEl.innerHTML = `<div class="deadend">Unresolved reference (rid ${rid}).</div>`; return; }
+
+  const cardType = node.m_cardType || node.type;
+  const cardDiv = document.createElement("div");
+  cardDiv.className = "card";
+  cardDiv.innerHTML = `
+    <div class="head">
+      <span class="badge ${cardType}">${escapeHtml(prettyCardType(node))}</span>
+    </div>
+    ${cardBodyHtml(node, nodes)}
+  `;
+  scriptEl.appendChild(cardDiv);
+
+  const raw = document.createElement("details");
+  raw.className = "raw";
+  raw.innerHTML = `<summary>raw node data</summary><pre>${escapeHtml(JSON.stringify(node, null, 1))}</pre>`;
+  scriptEl.appendChild(raw);
+
+  const children = node.m_children || [];
+  const outputPins = node.m_outputPins || [];
+  const branchTargets = [];
+  for (const childRef of children) {
+    const edgeNode = nodes[String(childRef.rid)];
+    if (!edgeNode || edgeNode.type !== "RtOutputPinEdges") continue;
+    const pinIndex = edgeNode.m_outputPinIndex;
+    const pinName = outputPins[pinIndex] ? outputPins[pinIndex].m_name : null;
+    for (const cardRef of (edgeNode.m_cardsReferences || [])) {
+      branchTargets.push({ pinName, cardId: cardRef.m_cardId, flowId: cardRef.m_flowId });
+    }
+  }
+  if (branchTargets.length === 0) {
+    const de = document.createElement("div");
+    de.className = "deadend";
+    de.textContent = node.type === "RtEndCard" ? "" : "(no further branches from this card)";
+    scriptEl.appendChild(de);
+  } else {
+    const branchesDiv = document.createElement("div");
+    branchesDiv.className = "branches";
+    scriptEl.appendChild(branchesDiv);
+    for (const bt of branchTargets) {
+      const target = await resolveCardTarget(bt.cardId, bt.flowId);
+      const btn = document.createElement("button");
+      btn.className = "branch-btn";
+      let label;
+      if (!target) { label = `(unresolved reference)`; btn.disabled = true; }
+      else {
+        label = summarizeText(target.node, target.nodes);
+        if (target.file !== currentFile) label += `  [other flow]`;
+      }
+      btn.innerHTML = `${bt.pinName ? `<span class="pin">${escapeHtml(bt.pinName)}</span>` : ""}${escapeHtml(label)}`;
+      if (target) btn.addEventListener("click", () => navigateTo(target.file, target.rid));
+      branchesDiv.appendChild(btn);
+    }
+  }
+}
+
+/* ================= GRAPH MODE ================= */
+const COL_W = 250, COL_GAP = 60, ROW_H = 118, ROW_GAP = 16;
+const NODE_W = 210, NODE_H = 108;
+let currentGraph = null; // {nodes: Map(key->{...,depth,lane}), edges: [...]}
+let selectedNodeKey = null;
+let connectedKeys = null; // Set of node keys directly connected to selectedNodeKey, or null if nothing selected
+let panX = 0, panY = 40, zoom = 1;
+
+function computeConnectedKeys(key) {
+  const set = new Set([key]);
+  for (const e of currentGraph.edges) {
+    if (e.from === key) set.add(e.to);
+    if (e.to === key) set.add(e.from);
+  }
+  return set;
+}
+
+async function openGraph(flowId, file, jumpRid = null) {
+  document.getElementById("detailPanel").style.display = "none";
+  selectedNodeKey = null;
+  connectedKeys = null;
+  currentGraph = await buildGraph(flowId, file);
+  panX = 0; panY = 40; zoom = 1;
+  document.getElementById("zoomResetBtn").disabled = false;
+  drawGraph();
+  if (jumpRid && currentGraph.gnodes.has(String(jumpRid))) {
+    const gn = currentGraph.gnodes.get(String(jumpRid));
+    centerOnNode(gn);
+    await onNodeClick(gn); // also sets the hash for this specific node
+  } else {
+    updateHash();
+  }
+}
+function centerOnNode(gn) {
+  const { x, y } = nodeXY(gn);
+  const rect = document.getElementById("graphWrap").getBoundingClientRect();
+  zoom = 1;
+  panX = rect.width / 2 - (x + NODE_W / 2) * zoom;
+  panY = rect.height / 2 - (y + NODE_H / 2) * zoom;
+  drawGraph();
+}
+
+async function buildGraph(flowId, file) {
+  const chunk = await getChunk(file);
+  const cardMap = chunk.flows[flowId] || {};
+  const nodes = chunk.nodes;
+  const gnodes = new Map(); // key -> {key, node, external, depth, flowId, cardId}
+  const edges = []; // {from, to, pinName}
+
+  let starts = [];
+  for (const [cardId, rid] of Object.entries(cardMap)) {
+    const n = nodes[String(rid)];
+    if (n && n.type === "RtStartCard") starts.push(String(rid));
+  }
+  if (starts.length === 0) starts = Object.values(cardMap).slice(0, 1).map(String);
+
+  const queue = starts.map(rid => ({ key: rid, depth: 0 }));
+  const visited = new Set();
+  while (queue.length) {
+    const { key, depth } = queue.shift();
+    if (visited.has(key)) continue;
+    visited.add(key);
+    const node = nodes[key];
+    if (!node) continue;
+    gnodes.set(key, { key, node, external: false, depth });
+
+    const children = node.m_children || [];
+    const outputPins = node.m_outputPins || [];
+    for (const childRef of children) {
+      const edgeNode = nodes[String(childRef.rid)];
+      if (!edgeNode || edgeNode.type !== "RtOutputPinEdges") continue;
+      const pinIndex = edgeNode.m_outputPinIndex;
+      const pinName = outputPins[pinIndex] ? outputPins[pinIndex].m_name : null;
+      for (const cardRef of (edgeNode.m_cardsReferences || [])) {
+        if (cardRef.m_flowId === flowId && cardMap[cardRef.m_cardId] !== undefined) {
+          const targetKey = String(cardMap[cardRef.m_cardId]);
+          edges.push({ from: key, to: targetKey, pinName });
+          if (!visited.has(targetKey)) queue.push({ key: targetKey, depth: depth + 1 });
+        } else {
+          const extKey = `ext:${cardRef.m_flowId}:${cardRef.m_cardId}`;
+          if (!gnodes.has(extKey)) {
+            gnodes.set(extKey, { key: extKey, external: true, depth: depth + 1, flowId: cardRef.m_flowId, cardId: cardRef.m_cardId });
+          } else {
+            gnodes.get(extKey).depth = Math.min(gnodes.get(extKey).depth, depth + 1);
+          }
+          edges.push({ from: key, to: extKey, pinName });
+        }
+      }
+    }
+  }
+
+  // assign lanes within each depth column, in discovery order
+  const byDepth = new Map();
+  for (const gn of gnodes.values()) {
+    if (!byDepth.has(gn.depth)) byDepth.set(gn.depth, []);
+    byDepth.get(gn.depth).push(gn);
+  }
+  for (const [depth, arr] of byDepth) {
+    arr.forEach((gn, i) => { gn.lane = i; });
+  }
+
+  return { gnodes, edges, file, flowId, nodes };
+}
+
+function nodeXY(gn) {
+  const x = gn.depth * (COL_W + COL_GAP) + 20;
+  const y = gn.lane * (ROW_H + ROW_GAP) + 20;
+  return { x, y };
+}
+
+function syncSvgToContainer(svg) {
+  // Keep the viewBox in exact 1:1 sync with the container's rendered pixel
+  // size. If the viewBox instead scaled to fit graph content (which can be
+  // huge), mouse coordinates (CSS px) and pan/zoom math (viewBox units) end
+  // up in different scales, making zoom drift toward the origin and pan feel
+  // sluggish or fast depending on how big the current graph happens to be.
+  const rect = document.getElementById("graphWrap").getBoundingClientRect();
+  const w = Math.max(rect.width, 1), h = Math.max(rect.height, 1);
+  svg.setAttribute("width", w);
+  svg.setAttribute("height", h);
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+}
+window.addEventListener("resize", () => {
+  if (currentGraph) syncSvgToContainer(document.getElementById("graphSvg"));
+});
+
+function drawGraph() {
+  const svg = document.getElementById("graphSvg");
+  svg.innerHTML = "";
+  if (!currentGraph) return;
+
+  const pos = new Map();
+  for (const gn of currentGraph.gnodes.values()) {
+    const { x, y } = nodeXY(gn);
+    pos.set(gn.key, { x, y });
+  }
+
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("id", "viewport");
+  g.setAttribute("transform", `translate(${panX},${panY}) scale(${zoom})`);
+  syncSvgToContainer(svg);
+
+  // edges first (under nodes)
+  // Different pins (e.g. "fail" and "critical_failure") sometimes converge on
+  // the exact same target node. Since a curve is purely a function of its two
+  // node centers, edges sharing an identical (from,to) pair would otherwise
+  // draw exactly on top of one another. Fan them out with a small vertical
+  // offset per group so each stays visually distinct.
+  const edgeGroupTotals = new Map();
+  for (const e of currentGraph.edges) {
+    const key = `${e.from}=>${e.to}`;
+    edgeGroupTotals.set(key, (edgeGroupTotals.get(key) || 0) + 1);
+  }
+  const edgeGroupSeen = new Map();
+  const EDGE_FAN = 14;
+
+  function edgeColor(e) {
+    const pin = (e.pinName || "").toLowerCase();
+    if (pin.includes("critical")) return "#c246d1";
+    if (pin === "fail" || pin === "failure") return "#ed4245";
+    if (pin === "success") return "#3ba55d";
+    if (pin === "default" && currentGraph.gnodes.get(e.from)?.node?.type === "RtC4ForkCard") return "#3ba55d";
+    return "#8e9297";
+  }
+
+  for (const e of currentGraph.edges) {
+    const a = pos.get(e.from), b = pos.get(e.to);
+    if (!a || !b) continue;
+    const key = `${e.from}=>${e.to}`;
+    const total = edgeGroupTotals.get(key);
+    const seenIdx = edgeGroupSeen.get(key) || 0;
+    edgeGroupSeen.set(key, seenIdx + 1);
+    const fanOffset = total > 1 ? (seenIdx - (total - 1) / 2) * EDGE_FAN : 0;
+    const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2 + fanOffset;
+    const x2 = b.x, y2 = b.y + NODE_H / 2 + fanOffset;
+    const mx = (x1 + x2) / 2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
+    const color = edgeColor(e);
+    path.setAttribute("stroke", color);
+    path.setAttribute("stroke-width", "1.6");
+    path.setAttribute("fill", "none");
+    const edgeDimmed = connectedKeys && e.from !== selectedNodeKey && e.to !== selectedNodeKey;
+    path.setAttribute("opacity", edgeDimmed ? "0.1" : "0.75");
+    g.appendChild(path);
+    if (e.pinName && e.pinName !== "default") {
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", mx);
+      label.setAttribute("y", (y1 + y2) / 2 - 4);
+      label.setAttribute("fill", color);
+      label.setAttribute("font-size", "9");
+      label.setAttribute("text-anchor", "middle");
+      label.textContent = e.pinName;
+      g.appendChild(label);
+    }
+  }
+
+  // nodes
+  for (const gn of currentGraph.gnodes.values()) {
+    const { x, y } = pos.get(gn.key);
+    const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+    fo.setAttribute("x", x); fo.setAttribute("y", y);
+    fo.setAttribute("width", NODE_W); fo.setAttribute("height", NODE_H);
+    const div = document.createElement("div");
+    let innerHtml;
+    if (gn.external) {
+      innerHtml = `<div class="gtype">→ other conversation</div><div class="gtext">${escapeHtml(gn.flowId)}</div>`;
+    } else {
+      const { speaker, text } = hasDialogueText(gn.node) ? speakerAndText(gn.node, currentGraph.nodes) : {};
+      innerHtml = `<div class="gtype">${escapeHtml(prettyCardType(gn.node))}</div>`;
+      if (speaker) innerHtml += `<div class="gspeaker">${escapeHtml(speaker)}</div>`;
+      innerHtml += `<div class="gtext">${escapeHtml(text || "")}</div>`;
+      if (CHECK_TYPES.has(gn.node.type)) {
+        const skill = prettySkill(gn.node.m_skillID);
+        const bits = [];
+        if (skill) bits.push(skill);
+        if (gn.node.m_threshold !== undefined) bits.push(`DC ${gn.node.m_threshold}`);
+        if (bits.length) innerHtml += `<div class="gskill">${escapeHtml(bits.join(" · "))}</div>`;
+      }
+      if (gn.node.type === "RtC4ForkCard") {
+        const condText = forkConditionText(gn.node, currentGraph.nodes);
+        if (condText) innerHtml += `<div class="gcondition">${escapeHtml(condText)}</div>`;
+      }
+    }
+    div.className = `gnode-box type-${nodeTypeClass(gn.external ? null : gn.node)}`;
+    if (gn.key === selectedNodeKey) div.classList.add("selected");
+    if (connectedKeys && !connectedKeys.has(gn.key)) div.classList.add("dimmed");
+    if (!gn.external && activeFilter?.type === "character") {
+      const { speaker } = hasDialogueText(gn.node) ? speakerAndText(gn.node, currentGraph.nodes) : {};
+      if (speaker === activeFilter.value) div.classList.add("highlight");
+    }
+    if (gn.node?.type === "RtC4JumpCard") div.title = "Double-click to jump to where this goes";
+    div.innerHTML = innerHtml;
+    div.addEventListener("click", (ev) => { ev.stopPropagation(); onNodeClick(gn); });
+    div.addEventListener("dblclick", (ev) => { ev.stopPropagation(); onNodeDoubleClick(gn); });
+    fo.appendChild(div);
+    g.appendChild(fo);
+  }
+
+  svg.appendChild(g);
+  drawLegend();
+}
+
+function drawLegend() {
+  const el = document.getElementById("legend");
+  const items = [
+    ["#3ba55d", "start/end"], ["#5865f2", "dialogue"], ["#faa61a", "fork (condition)"],
+    ["#949cf7", "hub"], ["#ed4245", "jump"], ["#3ba57a", "passive check"],
+    ["#d1495b", "anti-passive check"], ["#9aa0a6", "white/red check"], ["transparent", "other conversation"],
+  ];
+  el.innerHTML = items.map(([c, l]) => `<span><i style="background:${c};${c==='transparent'?'border:1px dashed var(--muted)':''}"></i>${l}</span>`).join("");
+}
+
+async function onNodeClick(gn) {
+  selectedNodeKey = gn.key;
+  connectedKeys = computeConnectedKeys(gn.key);
+  drawGraph();
+  updateHash(gn.external ? null : gn.key);
+  const panel = document.getElementById("detailPanel");
+  panel.style.display = "block";
+  if (gn.external) {
+    panel.innerHTML = `
+      <span class="closeBtn" onclick="document.getElementById('detailPanel').style.display='none'">&times;</span>
+      <h3>Continues in another conversation</h3>
+      <div style="margin-top:10px"><button id="jumpBtn" class="branch-btn" style="max-width:none">Open that conversation &rarr;</button></div>
+      <details class="raw"><summary>raw reference</summary><pre>${escapeHtml(JSON.stringify({ flowId: gn.flowId, cardId: gn.cardId }, null, 1))}</pre></details>
+    `;
+    document.getElementById("jumpBtn").addEventListener("click", async () => {
+      const resolved = await resolveCardTarget(gn.cardId, gn.flowId);
+      if (resolved) await selectFlow(gn.flowId, resolved.file, resolved.rid);
+      else {
+        const file = flowFileMap.get(gn.flowId);
+        if (file) await selectFlow(gn.flowId, file); // fall back to the flow's default view
+      }
+    });
+  } else {
+    panel.innerHTML = `
+      <span class="closeBtn" onclick="document.getElementById('detailPanel').style.display='none'">&times;</span>
+      <h3>${escapeHtml(prettyCardType(gn.node))}</h3>
+      <div style="margin:8px 0">${cardBodyHtml(gn.node, currentGraph.nodes)}</div>
+      <details class="raw"><summary>raw node data</summary><pre>${escapeHtml(JSON.stringify(gn.node, null, 1))}</pre></details>
+    `;
+    if (gn.node.type === "RtC4JumpCard") {
+      const targetKey = resolveJumpTargetKey(gn);
+      const targetGn = targetKey ? currentGraph.gnodes.get(targetKey) : null;
+      if (targetGn) {
+        const btn = document.createElement("button");
+        btn.className = "branch-btn";
+        btn.style.maxWidth = "none";
+        btn.style.marginTop = "10px";
+        btn.textContent = "Jump to destination → (or just double-click the node)";
+        btn.addEventListener("click", () => onNodeDoubleClick(gn));
+        panel.appendChild(btn);
+      }
+    }
+  }
+}
+
+// Jump cards (RtC4JumpCard) are pure "goto" nodes: no dialogue, no branches,
+// exactly one outgoing edge — often looping back to an earlier Hub. Rather
+// than re-deriving the target from scratch, reuse the edge buildGraph() already
+// computed for this node (there's exactly one).
+function resolveJumpTargetKey(gn) {
+  if (!gn.node || gn.node.type !== "RtC4JumpCard") return null;
+  const edge = currentGraph.edges.find(e => e.from === gn.key);
+  return edge ? edge.to : null;
+}
+async function onNodeDoubleClick(gn) {
+  const targetKey = resolveJumpTargetKey(gn);
+  if (!targetKey) return;
+  const targetGn = currentGraph.gnodes.get(targetKey);
+  if (!targetGn) return;
+  if (targetGn.external) {
+    const resolved = await resolveCardTarget(targetGn.cardId, targetGn.flowId);
+    if (resolved) {
+      await selectFlow(targetGn.flowId, resolved.file, resolved.rid);
+    } else {
+      const file = flowFileMap.get(targetGn.flowId);
+      if (file) await selectFlow(targetGn.flowId, file); // fall back to the flow's default view
+    }
+  } else {
+    centerOnNode(targetGn);
+    await onNodeClick(targetGn);
+  }
+}
+
+// pan & zoom
+const graphWrap = document.getElementById("graphWrap");
+let dragging = false, dragStart = null, dragMoved = false;
+graphWrap.addEventListener("mousedown", (e) => {
+  dragging = true; dragMoved = false; dragStart = { x: e.clientX, y: e.clientY, panX, panY };
+  graphWrap.classList.add("panning");
+});
+window.addEventListener("mousemove", (e) => {
+  if (!dragging) return;
+  if (Math.abs(e.clientX - dragStart.x) > 3 || Math.abs(e.clientY - dragStart.y) > 3) dragMoved = true;
+  panX = dragStart.panX + (e.clientX - dragStart.x);
+  panY = dragStart.panY + (e.clientY - dragStart.y);
+  const g = document.getElementById("viewport");
+  if (g) g.setAttribute("transform", `translate(${panX},${panY}) scale(${zoom})`);
+});
+window.addEventListener("mouseup", () => { dragging = false; graphWrap.classList.remove("panning"); });
+graphWrap.addEventListener("click", () => {
+  if (dragMoved) return; // was a pan drag, not a click on empty background
+  if (selectedNodeKey === null && connectedKeys === null) return;
+  selectedNodeKey = null;
+  connectedKeys = null;
+  document.getElementById("detailPanel").style.display = "none";
+  drawGraph();
+  updateHash();
+});
+graphWrap.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const rect = graphWrap.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+  const worldX = (mouseX - panX) / zoom, worldY = (mouseY - panY) / zoom;
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  zoom = Math.min(8, Math.max(0.1, zoom * factor));
+  panX = mouseX - worldX * zoom;
+  panY = mouseY - worldY * zoom;
+  const g = document.getElementById("viewport");
+  if (g) g.setAttribute("transform", `translate(${panX},${panY}) scale(${zoom})`);
+}, { passive: false });
+document.getElementById("zoomResetBtn").addEventListener("click", () => {
+  panX = 0; panY = 40; zoom = 1;
+  const g = document.getElementById("viewport");
+  if (g) g.setAttribute("transform", `translate(${panX},${panY}) scale(${zoom})`);
+});
+
+/* ---------------- mode switching ---------------- */
+document.getElementById("graphModeBtn").addEventListener("click", async () => {
+  viewMode = "graph";
+  document.getElementById("graphModeBtn").classList.add("active");
+  document.getElementById("readerModeBtn").classList.remove("active");
+  document.getElementById("readerScroll").style.display = "none";
+  document.getElementById("graphWrap").style.display = "block";
+  document.getElementById("backBtn").style.display = "none";
+  document.getElementById("restartBtn").style.display = "none";
+  document.getElementById("zoomResetBtn").style.display = "inline-block";
+  if (currentFlowId && currentFile) await openGraph(currentFlowId, currentFile);
+});
+document.getElementById("readerModeBtn").addEventListener("click", async () => {
+  viewMode = "reader";
+  document.getElementById("readerModeBtn").classList.add("active");
+  document.getElementById("graphModeBtn").classList.remove("active");
+  document.getElementById("graphWrap").style.display = "none";
+  document.getElementById("readerScroll").style.display = "block";
+  document.getElementById("backBtn").style.display = "inline-block";
+  document.getElementById("restartBtn").style.display = "inline-block";
+  document.getElementById("zoomResetBtn").style.display = "none";
+  document.getElementById("detailPanel").style.display = "none";
+  if (currentFlowId && currentFile) await openReaderStart(currentFlowId, currentFile);
+});
+
+(async function init() {
+  document.getElementById("zoomResetBtn").style.display = "inline-block";
+  document.getElementById("backBtn").style.display = "none";
+  document.getElementById("restartBtn").style.display = "none";
+  flowsIndex = await loadJSON("flows_index.json");
+  characters = await loadJSON("characters.json");
+  skills = await loadJSON("skills.json");
+  for (const f of flowsIndex) flowFileMap.set(f.flowId, f.file);
+  renderFlowList("");
+  loadJSON("search_index.json").then(data => { searchIndex = data; }); // big-ish (~13MB); don't block first paint on it
+
+  const shared = parseHash();
+  if (shared) {
+    viewMode = shared.mode === "reader" ? "reader" : "graph";
+    document.getElementById(viewMode === "reader" ? "readerModeBtn" : "graphModeBtn").classList.add("active");
+    document.getElementById(viewMode === "reader" ? "graphModeBtn" : "readerModeBtn").classList.remove("active");
+    document.getElementById("readerScroll").style.display = viewMode === "reader" ? "block" : "none";
+    document.getElementById("graphWrap").style.display = viewMode === "reader" ? "none" : "block";
+    document.getElementById("backBtn").style.display = viewMode === "reader" ? "inline-block" : "none";
+    document.getElementById("restartBtn").style.display = viewMode === "reader" ? "inline-block" : "none";
+    document.getElementById("zoomResetBtn").style.display = viewMode === "reader" ? "none" : "inline-block";
+    try {
+      await selectFlow(shared.flowId, shared.file, shared.node);
+    } catch (e) {
+      console.error("failed to restore shared link", e);
+    }
+  }
+})();
+</script>
+</body>
+</html>
