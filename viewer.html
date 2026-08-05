@@ -1217,6 +1217,288 @@ function nodeColor(gn) {
   return NODE_COLORS[nodeTypeClass(gn.external ? null : gn.node)] || "#5c6067";
 }
 
+/* ---- character-relationship layout: group conversations by their primary
+ * speaker, then place those per-character blocks via a force-directed graph
+ * where two characters pull together the more conversations they share
+ * (co-occurrence -- both have dialogue in the same conversation), so the
+ * clustering reflects the actual social web rather than an arbitrary shelf
+ * order. Conversations with no clear speaker (mechanical/instruction-only
+ * flows) get their own "Other" area rather than being forced onto a
+ * character they don't really belong to. */
+let universeCharacterBlocks = null; // [{char, anchorX, anchorY, width, height, clusterCount}]
+let universeCharacterEdges = null; // [{ax1,ay1,ax2,ay2,weight}]
+
+function buildCharacterCoOccurrence() {
+  const coOccur = new Map(); // "A|B" (A<B) -> shared-conversation count
+  const charSet = new Set();
+  for (const f of flowsIndex) {
+    // f.speakers includes skill-voiced passive-check "speakers" (see the
+    // skill-block layout above) -- exclude those here too, or they'd pollute
+    // the character-relationship web with pseudo-characters like "presence".
+    const speakers = (f.speakers || []).filter(s => !(s in SKILL_NAMES));
+    for (const s of speakers) charSet.add(s);
+    for (let i = 0; i < speakers.length; i++) {
+      for (let j = i + 1; j < speakers.length; j++) {
+        const a = speakers[i] < speakers[j] ? speakers[i] : speakers[j];
+        const b = speakers[i] < speakers[j] ? speakers[j] : speakers[i];
+        const key = `${a}|${b}`;
+        coOccur.set(key, (coOccur.get(key) || 0) + 1);
+      }
+    }
+  }
+  return { characters: [...charSet], coOccur };
+}
+
+// Simple force-directed layout (repulsion between every pair + spring
+// attraction along co-occurrence edges, weight-scaled). Cheap at ~100
+// characters (O(n^2) per iteration is trivial at this n) even though the
+// conversation graphs it's arranging are individually huge.
+function forceDirectedCharacterLayout(characters, coOccur, iterations = 400) {
+  const n = characters.length;
+  const idx = new Map(characters.map((c, i) => [c, i]));
+  const pos = characters.map((_, i) => {
+    const angle = (i / n) * Math.PI * 2;
+    return { x: Math.cos(angle) * 10, y: Math.sin(angle) * 10 };
+  });
+  const vel = characters.map(() => ({ x: 0, y: 0 }));
+  const edges = [];
+  for (const [key, weight] of coOccur) {
+    const [a, b] = key.split("|");
+    edges.push({ a: idx.get(a), b: idx.get(b), weight });
+  }
+
+  const REPULSION = 90, SPRING = 0.02, DAMPING = 0.85;
+  for (let iter = 0; iter < iterations; iter++) {
+    const force = characters.map(() => ({ x: 0, y: 0 }));
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        let dx = pos[i].x - pos[j].x, dy = pos[i].y - pos[j].y;
+        let distSq = dx * dx + dy * dy;
+        if (distSq < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; distSq = 0.01; }
+        const dist = Math.sqrt(distSq);
+        const f = REPULSION / distSq;
+        const fx = (dx / dist) * f, fy = (dy / dist) * f;
+        force[i].x += fx; force[i].y += fy;
+        force[j].x -= fx; force[j].y -= fy;
+      }
+    }
+    for (const e of edges) {
+      const dx = pos[e.a].x - pos[e.b].x, dy = pos[e.a].y - pos[e.b].y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const restLength = 8 / Math.sqrt(e.weight); // more shared scenes -> pulled closer
+      const f = SPRING * e.weight * (dist - restLength);
+      const fx = (dx / dist) * f, fy = (dy / dist) * f;
+      force[e.a].x -= fx; force[e.a].y -= fy;
+      force[e.b].x += fx; force[e.b].y += fy;
+    }
+    const MAX_SPEED = 12; // caps how far a node can move in one step
+    for (let i = 0; i < n; i++) {
+      vel[i].x = (vel[i].x + force[i].x) * DAMPING;
+      vel[i].y = (vel[i].y + force[i].y) * DAMPING;
+      const speed = Math.sqrt(vel[i].x * vel[i].x + vel[i].y * vel[i].y);
+      if (speed > MAX_SPEED) {
+        vel[i].x = (vel[i].x / speed) * MAX_SPEED;
+        vel[i].y = (vel[i].y / speed) * MAX_SPEED;
+      }
+      pos[i].x += vel[i].x;
+      pos[i].y += vel[i].y;
+    }
+  }
+
+  const result = new Map();
+  characters.forEach((c, i) => result.set(c, pos[i]));
+  return { positions: result, edges };
+}
+
+function squarishRowWidth(list) {
+  // Row width based on cluster *count* alone badly misjudges characters whose
+  // conversations vary hugely in size (some are 700+ nodes across dozens of
+  // columns, others are a couple of nodes) -- baseline width for a roughly
+  // square final block instead: classic bin-packing heuristic, target row
+  // width ~= sqrt(total area), with a fudge factor for imperfect packing.
+  const totalArea = list.reduce((sum, c) => sum + c.width * c.height, 0);
+  return Math.max(COL_W + COL_GAP, Math.sqrt(totalArea) * 1.3);
+}
+
+function resolveBlockOverlaps(blocks, iterations = 400) {
+  // Simple iterative rectangle-separation pass: for each overlapping pair,
+  // push both apart (split evenly) along whichever axis has the smaller
+  // overlap, so two blocks separate via the shortest path rather than always
+  // shoving along one fixed axis. Repeats until stable or the iteration cap.
+  for (let iter = 0; iter < iterations; iter++) {
+    let anyOverlap = false;
+    for (let i = 0; i < blocks.length; i++) {
+      for (let j = i + 1; j < blocks.length; j++) {
+        const a = blocks[i], b = blocks[j];
+        const ax0 = a.anchorX - a.width / 2, ax1 = a.anchorX + a.width / 2;
+        const ay0 = a.anchorY - a.height / 2, ay1 = a.anchorY + a.height / 2;
+        const bx0 = b.anchorX - b.width / 2, bx1 = b.anchorX + b.width / 2;
+        const by0 = b.anchorY - b.height / 2, by1 = b.anchorY + b.height / 2;
+        const overlapX = Math.min(ax1, bx1) - Math.max(ax0, bx0);
+        const overlapY = Math.min(ay1, by1) - Math.max(ay0, by0);
+        if (overlapX <= 0 || overlapY <= 0) continue;
+        anyOverlap = true;
+        const ddx = b.anchorX - a.anchorX, ddy = b.anchorY - a.anchorY;
+        if (overlapX < overlapY) {
+          const push = (overlapX / 2 + 15) * (ddx >= 0 ? 1 : -1);
+          a.anchorX -= push; b.anchorX += push;
+        } else {
+          const push = (overlapY / 2 + 15) * (ddy >= 0 ? 1 : -1);
+          a.anchorY -= push; b.anchorY += push;
+        }
+      }
+    }
+    if (!anyOverlap) break;
+  }
+}
+
+function shelfPackList(list, maxRowWidth) {
+  let shelfX = 0, shelfY = 0, shelfMaxH = 0;
+  for (const c of list) {
+    if (shelfX > 0 && shelfX + c.width > maxRowWidth) {
+      shelfY += shelfMaxH + UNIVERSE_CLUSTER_GAP;
+      shelfX = 0;
+      shelfMaxH = 0;
+    }
+    c.localX = shelfX;
+    c.localY = shelfY;
+    shelfX += c.width + UNIVERSE_CLUSTER_GAP;
+    shelfMaxH = Math.max(shelfMaxH, c.height);
+  }
+  return { width: shelfX > 0 ? Math.max(...list.map(c => c.localX + c.width)) : 0, height: shelfY + shelfMaxH };
+}
+
+function layoutUniverseByCharacter(clusters) {
+  const { characters, coOccur } = buildCharacterCoOccurrence();
+  const { positions, edges } = forceDirectedCharacterLayout(characters, coOccur);
+
+  // Three zones, stacked vertically so none can overlap regardless of each
+  // zone's own shape: (1) the character web -- real speaking characters,
+  // force-directed by co-occurrence, the actual point of this layout; (2) a
+  // skill zone -- turns out ~60% of flows are *entirely* skill-voiced internal
+  // monologue (not just an occasional passive-check line), so those get their
+  // own grid of skill-labeled blocks instead of diluting either the character
+  // web or the catch-all; (3) "Other" -- genuinely speakerless flows (mostly
+  // mechanical fork/instruction-only sequences with no dialogue at all).
+  const flowMetaByFlowId = new Map(flowsIndex.map(f => [f.flowId, f]));
+  const byChar = new Map();
+  const bySkill = new Map();
+  const otherClusters = [];
+  for (const c of clusters) {
+    const f = flowMetaByFlowId.get(c.flowId);
+    if (f && f.primarySpeaker) {
+      if (!byChar.has(f.primarySpeaker)) byChar.set(f.primarySpeaker, []);
+      byChar.get(f.primarySpeaker).push(c);
+    } else if (f && f.primarySkillSpeaker) {
+      if (!bySkill.has(f.primarySkillSpeaker)) bySkill.set(f.primarySkillSpeaker, []);
+      bySkill.get(f.primarySkillSpeaker).push(c);
+    } else {
+      otherClusters.push(c);
+    }
+  }
+
+  const blocks = [];
+  for (const [char, list] of byChar) {
+    const rowWidth = squarishRowWidth(list);
+    const { width, height } = shelfPackList(list, rowWidth);
+    blocks.push({ kind: "character", label: char, clusters: list, width, height, force: positions.get(char) || { x: 0, y: 0 } });
+  }
+
+  // Deliberately a small FIXED scale, not one derived from block sizes --
+  // scaling every abstract force-layout coordinate by a size-based factor
+  // stretches *every* pair uniformly, including characters the simulation
+  // already placed appropriately close together. Real overlap-avoidance is
+  // resolveBlockOverlaps()'s job below, which only pushes apart the specific
+  // pairs that actually need it (in practice, just the handful of biggest
+  // characters), leaving small/closely-related characters naturally close.
+  const SPACING_SCALE = 130;
+  for (const block of blocks) {
+    block.anchorX = block.force.x * SPACING_SCALE;
+    block.anchorY = block.force.y * SPACING_SCALE;
+  }
+  // Percentile-based spacing above trades a small chance of overlap for a
+  // much more compact layout; clean up any remaining overlaps (almost always
+  // just among the handful of biggest characters) here instead.
+  resolveBlockOverlaps(blocks);
+  for (const block of blocks) {
+    const originX = block.anchorX - block.width / 2, originY = block.anchorY - block.height / 2;
+    for (const c of block.clusters) {
+      c.offsetX = originX + c.localX;
+      c.offsetY = originY + c.localY;
+    }
+  }
+
+  let minX = 0, maxX = 0, maxCharBottom = 0;
+  for (const block of blocks) {
+    minX = Math.min(minX, block.anchorX - block.width / 2);
+    maxX = Math.max(maxX, block.anchorX + block.width / 2);
+    maxCharBottom = Math.max(maxCharBottom, block.anchorY + block.height / 2);
+  }
+
+  // Skill zone: simple grid (only 15 of them, no need for force-layout) just
+  // below the character web.
+  const skillZoneTop = maxCharBottom + UNIVERSE_CLUSTER_GAP * 5;
+  let skillX = minX, skillRowY = skillZoneTop, skillRowMaxH = 0, skillZoneBottom = skillZoneTop;
+  const skillBlocks = [];
+  for (const [skill, list] of bySkill) {
+    const rowWidth = squarishRowWidth(list);
+    const { width, height } = shelfPackList(list, rowWidth);
+    if (skillX > minX && skillX + width > maxX) {
+      skillRowY += skillRowMaxH + UNIVERSE_CLUSTER_GAP;
+      skillX = minX;
+      skillRowMaxH = 0;
+    }
+    skillBlocks.push({ kind: "skill", label: skill, clusters: list, width, height, x: skillX, y: skillRowY });
+    skillX += width + UNIVERSE_CLUSTER_GAP;
+    skillRowMaxH = Math.max(skillRowMaxH, height);
+    skillZoneBottom = Math.max(skillZoneBottom, skillRowY + skillRowMaxH);
+  }
+  for (const b of skillBlocks) {
+    b.anchorX = b.x + b.width / 2;
+    b.anchorY = b.y + b.height / 2;
+    for (const c of b.clusters) {
+      c.offsetX = b.x + c.localX;
+      c.offsetY = b.y + c.localY;
+    }
+    blocks.push(b);
+  }
+
+  if (otherClusters.length) {
+    const { width, height } = shelfPackList(otherClusters, UNIVERSE_MAX_ROW_WIDTH);
+    const otherOriginY = skillZoneBottom + UNIVERSE_CLUSTER_GAP * 5;
+    for (const c of otherClusters) {
+      c.offsetX = minX + c.localX;
+      c.offsetY = otherOriginY + c.localY;
+    }
+    blocks.push({
+      kind: "other", label: "Other (no clear speaker)", clusters: otherClusters, width, height,
+      anchorX: minX + width / 2, anchorY: otherOriginY + height / 2,
+    });
+  }
+
+  // Normalize everything to non-negative coordinates (force layout spreads
+  // around the origin in both directions; the rest of universe rendering
+  // assumes a 0,0-anchored top-left the way fitUniverseView computes it).
+  let normMinX = 0, normMinY = 0;
+  for (const c of clusters) { normMinX = Math.min(normMinX, c.offsetX); normMinY = Math.min(normMinY, c.offsetY); }
+  for (const block of blocks) { normMinX = Math.min(normMinX, block.anchorX - block.width / 2); normMinY = Math.min(normMinY, block.anchorY - block.height / 2); }
+  if (normMinX < 0 || normMinY < 0) {
+    for (const c of clusters) { c.offsetX -= normMinX; c.offsetY -= normMinY; }
+    for (const block of blocks) { block.anchorX -= normMinX; block.anchorY -= normMinY; }
+  }
+
+  universeCharacterBlocks = blocks.map(b => ({ kind: b.kind, char: b.label, anchorX: b.anchorX, anchorY: b.anchorY, width: b.width, height: b.height, clusterCount: b.clusters.length }));
+  const idxByChar = new Map(universeCharacterBlocks.filter(b => b.kind === "character").map(b => [b.char, b]));
+  universeCharacterEdges = edges
+    .map(e => {
+      const ca = characters[e.a], cb = characters[e.b];
+      const ba = idxByChar.get(ca), bb = idxByChar.get(cb);
+      if (!ba || !bb) return null;
+      return { ax1: ba.anchorX, ay1: ba.anchorY, ax2: bb.anchorX, ay2: bb.anchorY, weight: e.weight };
+    })
+    .filter(Boolean);
+}
+
 async function loadUniverse() {
   const overlay = document.getElementById("universeLoading");
   if (universeClusters) { scheduleDrawUniverse(); return; } // already built once this session
@@ -1246,19 +1528,9 @@ async function loadUniverse() {
     }
   }
 
-  // shelf-pack: place clusters left-to-right, wrap to a new row once a row gets too wide
-  let shelfX = 0, shelfY = 0, shelfMaxH = 0;
-  for (const c of clusters) {
-    if (shelfX > 0 && shelfX + c.width > UNIVERSE_MAX_ROW_WIDTH) {
-      shelfY += shelfMaxH + UNIVERSE_CLUSTER_GAP;
-      shelfX = 0;
-      shelfMaxH = 0;
-    }
-    c.offsetX = shelfX;
-    c.offsetY = shelfY;
-    shelfX += c.width + UNIVERSE_CLUSTER_GAP;
-    shelfMaxH = Math.max(shelfMaxH, c.height);
-  }
+  textEl.textContent = "Arranging by character relationships...";
+  await new Promise(r => setTimeout(r, 0));
+  layoutUniverseByCharacter(clusters);
 
   const cardLoc = new Map();
   for (const c of clusters) {
@@ -1277,8 +1549,20 @@ async function loadUniverse() {
   drawLegend("universeLegend");
 }
 
-function fitUniverseView() {
+function getUniverseRect() {
+  // getBoundingClientRect() can come back all-zeros right when #universeWrap
+  // has just been switched to display:block (layout hasn't caught up yet --
+  // seen reliably in headless Chrome, and plausible in a real browser under
+  // similar first-paint timing). Dividing by a zero-sized rect corrupts
+  // uZoom/uPanX to NaN/Infinity for the rest of the session, not just this
+  // one call, so fall back to a sane estimate rather than trusting it blindly.
   const rect = document.getElementById("universeWrap").getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) return rect;
+  return { width: Math.max(1, window.innerWidth - 380), height: Math.max(1, window.innerHeight - 90), left: 0, top: 0 };
+}
+
+function fitUniverseView() {
+  const rect = getUniverseRect();
   let maxX = 1, maxY = 1;
   for (const c of universeClusters) {
     maxX = Math.max(maxX, c.offsetX + c.width);
@@ -1297,8 +1581,7 @@ function scheduleDrawUniverse() {
 
 function drawUniverse() {
   const canvas = document.getElementById("universeCanvas");
-  const wrap = document.getElementById("universeWrap");
-  const rect = wrap.getBoundingClientRect();
+  const rect = getUniverseRect();
   const dpr = window.devicePixelRatio || 1;
   const pxW = Math.max(1, Math.round(rect.width * dpr)), pxH = Math.max(1, Math.round(rect.height * dpr));
   if (canvas.width !== pxW || canvas.height !== pxH) {
@@ -1322,6 +1605,21 @@ function drawUniverse() {
   const vx1 = vx0 + rect.width / uZoom, vy1 = vy0 + rect.height / uZoom;
   const showText = uZoom > UNIVERSE_LOD_TEXT_ZOOM;
   const showNodes = uZoom > UNIVERSE_LOD_MIN_ZOOM;
+
+  // character-relationship web, drawn underneath everything -- visible at
+  // any zoom level since it's cheap (~one line per co-occurring character
+  // pair, not per-card) and is the whole point of this layout.
+  if (universeCharacterEdges) {
+    for (const e of universeCharacterEdges) {
+      if (Math.max(e.ax1, e.ax2) < vx0 || Math.min(e.ax1, e.ax2) > vx1 || Math.max(e.ay1, e.ay2) < vy0 || Math.min(e.ay1, e.ay2) > vy1) continue;
+      ctx.strokeStyle = `rgba(148,156,247,${Math.min(0.5, 0.08 + e.weight * 0.015)})`;
+      ctx.lineWidth = Math.min(6, 0.6 + e.weight * 0.15) / uZoom;
+      ctx.beginPath();
+      ctx.moveTo(e.ax1, e.ay1);
+      ctx.lineTo(e.ax2, e.ay2);
+      ctx.stroke();
+    }
+  }
 
   for (const c of universeClusters) {
     const cx1 = c.offsetX + c.width, cy1 = c.offsetY + c.height;
@@ -1356,6 +1654,33 @@ function drawUniverse() {
     }
   }
   ctx.restore();
+
+  // character name labels, drawn in screen space (outside the zoom
+  // transform) so they stay a constant, legible size no matter how far
+  // zoomed out you are -- these are the primary way to navigate the atlas.
+  if (universeCharacterBlocks) {
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    for (const b of universeCharacterBlocks) {
+      const sx = b.anchorX * uZoom + uPanX, sy = b.anchorY * uZoom + uPanY;
+      if (sx < -100 || sx > rect.width + 100 || sy < -40 || sy > rect.height + 40) continue;
+      const fontSize = Math.max(11, Math.min(22, 10 + Math.log2(b.clusterCount + 1) * 2.2));
+      ctx.font = `700 ${fontSize}px -apple-system, sans-serif`;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0,0,0,0.65)";
+      ctx.fillStyle = b.kind === "skill" ? "#faa61a" : (b.kind === "other" ? "#8e9297" : "#fff");
+      const display = b.kind === "skill" ? `⚙ ${prettySkill(b.char)}`
+        : b.kind === "other" ? b.char
+        : (b.char.charAt(0).toUpperCase() + b.char.slice(1));
+      ctx.strokeText(display, sx, sy - (showTextOffsetFor(b)));
+      ctx.fillText(display, sx, sy - (showTextOffsetFor(b)));
+    }
+  }
+}
+function showTextOffsetFor(b) {
+  // float the label just above the block once zoomed in enough that the
+  // block itself is visually large; keep it centered when still zoomed way out
+  return uZoom > 0.15 ? (b.height / 2) * uZoom + 14 : 0;
 }
 
 function drawUniverseNode(ctx, gn, cluster, x, y, showText) {
@@ -1439,7 +1764,7 @@ function onUniverseNodeSelect(hit) {
 }
 
 function flyToUniverseLocation(loc) {
-  const rect = document.getElementById("universeWrap").getBoundingClientRect();
+  const rect = getUniverseRect();
   uZoom = 1;
   uPanX = rect.width / 2 - (loc.absX + NODE_W / 2) * uZoom;
   uPanY = rect.height / 2 - (loc.absY + NODE_H / 2) * uZoom;
@@ -1474,7 +1799,7 @@ window.addEventListener("mousemove", (e) => {
 window.addEventListener("mouseup", () => { uDragging = false; universeWrap.classList.remove("panning"); });
 universeWrap.addEventListener("wheel", (e) => {
   e.preventDefault();
-  const rect = universeWrap.getBoundingClientRect();
+  const rect = getUniverseRect();
   const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
   const worldX = (mouseX - uPanX) / uZoom, worldY = (mouseY - uPanY) / uZoom;
   const factor = Math.exp(-e.deltaY * 0.0015);
@@ -1485,7 +1810,7 @@ universeWrap.addEventListener("wheel", (e) => {
 }, { passive: false });
 universeWrap.addEventListener("click", (e) => {
   if (uDragMoved) return;
-  const rect = universeWrap.getBoundingClientRect();
+  const rect = getUniverseRect();
   const worldX = (e.clientX - rect.left - uPanX) / uZoom, worldY = (e.clientY - rect.top - uPanY) / uZoom;
   const hit = universeHitTest(worldX, worldY);
   if (hit) {
@@ -1497,7 +1822,7 @@ universeWrap.addEventListener("click", (e) => {
   }
 });
 universeWrap.addEventListener("dblclick", (e) => {
-  const rect = universeWrap.getBoundingClientRect();
+  const rect = getUniverseRect();
   const worldX = (e.clientX - rect.left - uPanX) / uZoom, worldY = (e.clientY - rect.top - uPanY) / uZoom;
   const hit = universeHitTest(worldX, worldY);
   if (!hit || hit.gn.external) return;

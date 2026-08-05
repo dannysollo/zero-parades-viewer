@@ -1,15 +1,20 @@
-import argparse
 import json
 import os
 
-parser = argparse.ArgumentParser(description="Build search/character/skill indexes from extract_dialogue.py's chunk output.")
-parser.add_argument("--data-dir", default="./dialogue_data", help="Directory containing chunks/ (the --out-dir passed to extract_dialogue.py)")
-args = parser.parse_args()
-
-DATA_DIR = args.data_dir
+DATA_DIR = "/home/dannysollo/zero-parades/decompiled/dialogue_data"
 CHUNKS_DIR = os.path.join(DATA_DIR, "chunks")
 
 CHECK_TYPES = {"RtPassiveCard", "RtAntiPassiveCard", "RtWhiteCheckCard", "RtRedCheckCard"}
+
+# Passive checks sometimes put a skill name (not a real character) in the
+# normal "speaker" field -- see project notes on the "skill voicing a passive
+# observation" quirk. Real characters only, for anything that treats a flow's
+# speaker as "who this conversation belongs to" (e.g. the universe-view
+# character clustering) -- otherwise these pollute the character graph.
+SKILL_IDS = {
+    "coordination", "inference", "nerve", "wits", "entanglement", "inspiration", "affect", "presence",
+    "awareness", "motivation", "recall", "focus", "vigour", "muscle", "senses",
+}
 
 
 def resolve_leaf(nodes, rid):
@@ -86,12 +91,33 @@ for fname in chunk_files:
                     "sk": node.get("m_skillID") if node.get("type") in CHECK_TYPES else None,
                 })
 
+        # "Primary" speaker = whoever has the most lines in THIS flow (excluding
+        # skill-voiced passive checks) -- used for clustering conversations by
+        # character. Distinct from `speaker` above (the speaker of whichever
+        # card happened to be first in raw storage order, used only for the
+        # sidebar preview line's caption, which needs to match `preview`'s text).
+        #
+        # Turns out a large fraction of flows (roughly 60%) are *entirely*
+        # skill-voiced -- whole internal-monologue sequences, not just an
+        # occasional passive-check line inside an otherwise normal scene. Those
+        # get their own `primarySkillSpeaker` fallback so they can be grouped
+        # under their own skill rather than dumped into a generic catch-all
+        # alongside flows that have no speaker at all.
+        real_counts = {sp: cnt for sp, cnt in speaker_counts.items() if sp not in SKILL_IDS}
+        primary_speaker = max(real_counts, key=real_counts.get) if real_counts else None
+        primary_skill_speaker = None
+        if not primary_speaker:
+            skill_only_counts = {sp: cnt for sp, cnt in speaker_counts.items() if sp in SKILL_IDS}
+            primary_skill_speaker = max(skill_only_counts, key=skill_only_counts.get) if skill_only_counts else None
+
         flows.append({
             "flowId": flow_id,
             "chunkId": chunk["chunkId"],
             "file": file_ref,
             "cardCount": len(card_map),
             "speaker": preview_speaker,
+            "primarySpeaker": primary_speaker,
+            "primarySkillSpeaker": primary_skill_speaker,
             "preview": (preview_text[:140] if preview_text else None),
             "speakers": sorted(speaker_counts.keys()),
             "skills": sorted(flow_skills),
