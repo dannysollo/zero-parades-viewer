@@ -7,4 +7,5 @@ COPY characters.json /usr/share/nginx/html/characters.json
 COPY skills.json /usr/share/nginx/html/skills.json
 COPY search_index.json /usr/share/nginx/html/search_index.json
 COPY chunks /usr/share/nginx/html/chunks
+COPY audio /usr/share/nginx/html/audio
 EXPOSE 8080

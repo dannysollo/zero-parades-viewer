@@ -84,6 +84,14 @@
     background: var(--card-bg); border: 1px solid var(--border);
   }
   .card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .vo-btn {
+    display: inline-flex; align-items: center; gap: 5px; margin-top: 8px;
+    padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel);
+    color: var(--text); cursor: pointer; font-size: 11.5px; font-weight: 600;
+  }
+  .vo-btn:hover:not(:disabled) { background: var(--tag-bg); }
+  .vo-btn:disabled { opacity: 0.4; cursor: default; }
+  .vo-btn[data-state="playing"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .badge {
     font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em;
     padding: 2px 7px; border-radius: 5px; background: var(--tag-bg); color: var(--muted); font-weight: 600;
@@ -408,6 +416,9 @@ function cardBodyHtml(node, nodes) {
     html += `<div class="line">${escapeHtml(text || "(no text)")}</div>`;
     if (altCount) html += `<div class="alt-note">+${altCount} conditional alternative line(s) not shown</div>`;
     html += checkInfoHtml(node, nodes);
+    if (cd.dialog_lines !== undefined && node.m_cardId) {
+      html += `<button class="vo-btn" data-state="idle" onclick="event.stopPropagation(); toggleVoPlayback('${escapeHtml(node.m_cardId)}', this)">▶ Play voice line</button>`;
+    }
     return html;
   }
   if (node.type === "RtStartCard") return `<div class="line" style="color:var(--muted)">— start of flow —</div>`;
@@ -426,6 +437,38 @@ function cardBodyHtml(node, nodes) {
     kvHtml += `<div class="kv"><b>${escapeHtml(k)}:</b> ${resolved !== null ? escapeHtml(String(resolved)) : `<i>(complex, see raw)</i>`}</div>`;
   }
   return kvHtml || `<div class="line" style="color:var(--muted)">(no card data)</div>`;
+}
+let voPlayer = null, voActiveBtn = null;
+function setVoButtonState(btn, state) {
+  if (!btn) return;
+  btn.dataset.state = state;
+  btn.disabled = state === "missing" || state === "loading";
+  btn.textContent = state === "playing" ? "⏸ Stop"
+    : state === "loading" ? "… Loading"
+    : state === "missing" ? "No voice line available"
+    : "▶ Play voice line";
+}
+function toggleVoPlayback(cardId, btn) {
+  if (!voPlayer) {
+    voPlayer = new Audio();
+    voPlayer.addEventListener("ended", () => { if (voActiveBtn) setVoButtonState(voActiveBtn, "idle"); voActiveBtn = null; });
+    voPlayer.addEventListener("error", () => { if (voActiveBtn) setVoButtonState(voActiveBtn, "missing"); voActiveBtn = null; });
+  }
+  if (voActiveBtn === btn && !voPlayer.paused) {
+    voPlayer.pause();
+    setVoButtonState(btn, "idle");
+    voActiveBtn = null;
+    return;
+  }
+  if (voActiveBtn && voActiveBtn !== btn) setVoButtonState(voActiveBtn, "idle");
+  voActiveBtn = btn;
+  setVoButtonState(btn, "loading");
+  voPlayer.src = `audio/${cardId}.opus`;
+  voPlayer.play().then(() => {
+    if (voActiveBtn === btn) setVoButtonState(btn, "playing");
+  }).catch(() => {
+    if (voActiveBtn === btn) { setVoButtonState(btn, "missing"); voActiveBtn = null; }
+  });
 }
 function summarizeText(node, nodes) {
   const { speaker, text } = hasDialogueText(node) ? speakerAndText(node, nodes) : {};
