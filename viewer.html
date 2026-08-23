@@ -127,6 +127,12 @@
   .mod-pos { color: #3ba55d; font-weight: 700; }
   .mod-neg { color: #ed4245; font-weight: 700; }
   .mod-neu { color: var(--muted); font-weight: 700; }
+  .janus-alts { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .janus-alts-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+  .janus-alt { margin-bottom: 8px; }
+  .janus-alt:last-child { margin-bottom: 0; }
+  .janus-alt-cond { font-size: 12px; color: var(--accent); font-style: italic; margin-bottom: 2px; }
+  .janus-alt-text { font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
 
   /* Graph mode */
   #graphWrap { position: absolute; inset: 0; overflow: hidden; background: var(--canvas-bg); cursor: grab; }
@@ -407,14 +413,31 @@ function nodeTypeClass(node) {
   }
   return "other";
 }
+function janusAlternativesHtml(node, nodes) {
+  if (node.type !== "RtJanusCard") return "";
+  const cd = cardDataMap(node);
+  const altCount = resolveLeaf(nodes, (cd.alternativesCount || {}).rid) || 0;
+  if (!altCount) return "";
+  let rows = "";
+  for (let i = 1; i <= altCount; i++) {
+    const condRef = cd[`structuredCondition${i}`];
+    const altRef = cd[`alternative${i}`];
+    const condText = condRef ? resolveCondition(nodes, condRef.rid) : null;
+    const altText = altRef ? resolveLeaf(nodes, altRef.rid) : null;
+    rows += `<div class="janus-alt">
+      <div class="janus-alt-cond">IF ${escapeHtml(condText || "(condition not resolvable)")}</div>
+      <div class="janus-alt-text">${escapeHtml(altText || "(no text)")}</div>
+    </div>`;
+  }
+  return `<div class="janus-alts"><div class="janus-alts-label">Conditional alternative${altCount > 1 ? "s" : ""} (${altCount})</div>${rows}</div>`;
+}
 function cardBodyHtml(node, nodes) {
   const cd = cardDataMap(node);
   if (hasDialogueText(node)) {
     const { speaker, text } = speakerAndText(node, nodes);
-    const altCount = resolveLeaf(nodes, (cd.alternativesCount || {}).rid);
     let html = speaker ? `<div class="speaker">${escapeHtml(speaker)}</div>` : "";
     html += `<div class="line">${escapeHtml(text || "(no text)")}</div>`;
-    if (altCount) html += `<div class="alt-note">+${altCount} conditional alternative line(s) not shown</div>`;
+    html += janusAlternativesHtml(node, nodes);
     html += checkInfoHtml(node, nodes);
     if (cd.dialog_lines !== undefined && node.m_cardId) {
       html += `<button class="vo-btn" data-state="idle" onclick="event.stopPropagation(); toggleVoPlayback('${escapeHtml(node.m_cardId)}', this)">▶ Play voice line</button>`;
@@ -1075,6 +1098,11 @@ function drawGraph() {
       if (gn.node.type === "RtC4ForkCard") {
         const condText = forkConditionText(gn.node, currentGraph.nodes);
         if (condText) innerHtml += `<div class="gcondition">${escapeHtml(condText)}</div>`;
+      }
+      if (gn.node.type === "RtJanusCard") {
+        const janusCd = cardDataMap(gn.node);
+        const altCount = resolveLeaf(currentGraph.nodes, (janusCd.alternativesCount || {}).rid);
+        if (altCount) innerHtml += `<div class="gskill">+${altCount} conditional alt${altCount > 1 ? "s" : ""}</div>`;
       }
     }
     div.className = `gnode-box type-${nodeTypeClass(gn.external ? null : gn.node)}`;
