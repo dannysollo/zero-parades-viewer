@@ -74,6 +74,32 @@
   #toolbar button:hover { background: var(--tag-bg); }
   #toolbar button:disabled { opacity: 0.4; cursor: default; }
   #toolbar button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+  #aboutBtn {
+    position: fixed; top: 10px; right: 14px; z-index: 50;
+    padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--muted); cursor: pointer; font-size: 11.5px; font-weight: 600;
+  }
+  #aboutBtn:hover { background: var(--tag-bg); color: var(--text); }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-box {
+    max-width: 480px; width: 100%; max-height: 80vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; position: relative;
+  }
+  .modal-box h2 { margin: 0 0 10px 0; font-size: 18px; }
+  .modal-box p { font-size: 13px; line-height: 1.55; margin: 0 0 12px 0; }
+  .modal-box .legal { font-size: 11.5px; line-height: 1.5; color: var(--muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 16px; }
+  .modal-box .legal b { color: var(--text); }
+  .modal-close {
+    position: absolute; top: 12px; right: 14px; background: none; border: none;
+    color: var(--muted); font-size: 20px; cursor: pointer; line-height: 1; padding: 2px 4px;
+  }
+  .modal-close:hover { color: var(--text); }
+
   #viewArea { flex: 1; position: relative; overflow: hidden; }
   #placeholder { color: var(--muted); padding: 40px; text-align: center; }
 
@@ -208,6 +234,18 @@
 </style>
 </head>
 <body>
+<button id="aboutBtn">About</button>
+<div id="aboutModal" class="modal-overlay">
+  <div class="modal-box">
+    <button id="aboutCloseBtn" class="modal-close" title="Close">&times;</button>
+    <h2>About this site</h2>
+    <p>This is an unofficial, fan-made dialogue archive for <b>Zero Parades</b>, built by extracting and reassembling the game's own conversation data. It lets you search every line, browse by character or skill, and read or graph any conversation exactly as it branches in-game — in the spirit of the Disco Elysium Scribe project.</p>
+    <p>It's a reference tool for players, not a walkthrough — spoilers are everywhere, so read at your own risk.</p>
+    <div class="legal">
+      <b>Legal:</b> All dialogue, characters, and other creative content shown here are the property of ZA/UM and the Zero Parades team. This is an unofficial fan project, not affiliated with, endorsed by, or sponsored by ZA/UM or the Zero Parades team, and is provided free of charge for reference purposes only.
+    </div>
+  </div>
+</div>
 <div id="app">
   <div id="sidebar">
     <div id="tabs">
@@ -229,6 +267,7 @@
       <button id="graphModeBtn">Graph</button>
       <button id="readerModeBtn">Reader</button>
       <button id="universeModeBtn" class="active">All Conversations</button>
+      <button id="randomBtn" title="Jump to a random conversation" disabled>&#127922; Random</button>
       <span style="width:1px;height:16px;background:var(--border)"></span>
       <button id="backBtn" disabled>&larr; Back</button>
       <button id="restartBtn" disabled>&#8635; Restart</button>
@@ -1970,6 +2009,36 @@ document.getElementById("universeModeBtn").addEventListener("click", async () =>
   await loadUniverse();
 });
 
+document.getElementById("aboutBtn").addEventListener("click", () => {
+  document.getElementById("aboutModal").style.display = "flex";
+});
+document.getElementById("aboutCloseBtn").addEventListener("click", () => {
+  document.getElementById("aboutModal").style.display = "none";
+});
+document.getElementById("aboutModal").addEventListener("click", (e) => {
+  if (e.target.id === "aboutModal") document.getElementById("aboutModal").style.display = "none";
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") document.getElementById("aboutModal").style.display = "none";
+});
+
+async function goToRandomConversation() {
+  // prefer flows that actually read as a conversation (a few cards, some text)
+  // over one-line tooltip/orb flows, but fall back to the full pool if needed.
+  const candidates = flowsIndex.filter(f => f.cardCount >= 4 && f.preview);
+  const pool = candidates.length ? candidates : flowsIndex;
+  const f = pool[Math.floor(Math.random() * pool.length)];
+  viewMode = "reader";
+  document.getElementById("backBtn").style.display = "inline-block";
+  document.getElementById("restartBtn").style.display = "inline-block";
+  document.getElementById("zoomResetBtn").style.display = "none";
+  document.getElementById("searchBox").value = "";
+  activeFilter = null;
+  document.getElementById("filterChip").style.display = "none";
+  await selectFlow(f.flowId, f.file);
+}
+document.getElementById("randomBtn").addEventListener("click", goToRandomConversation);
+
 (async function init() {
   document.getElementById("zoomResetBtn").style.display = "inline-block";
   document.getElementById("backBtn").style.display = "none";
@@ -1979,6 +2048,7 @@ document.getElementById("universeModeBtn").addEventListener("click", async () =>
   skills = await loadJSON("skills.json");
   for (const f of flowsIndex) flowFileMap.set(f.flowId, f.file);
   renderFlowList("");
+  document.getElementById("randomBtn").disabled = false;
   loadJSON("search_index.json").then(data => { searchIndex = data; }); // big-ish (~13MB); don't block first paint on it
 
   const shared = parseHash();
