@@ -14,15 +14,27 @@ straightforward asset dump.
 
 ## What's here
 
-- **`extract_dialogue.py`** — points [UnityPy]'s `TypeTreeGenerator` at your
-  live game install (it reads `GameAssembly.dll` + `global-metadata.dat`
-  itself, no manual `.tpk` needed) to build a real type tree, then reads
-  every `MonoBehaviour` in the dialogue bundle and flattens the resolved
-  `SerializeReference` graph into one JSON file per chunk. `rid` values are
+- **`extract_dialogue.py`** — reads every `MonoBehaviour` in the dialogue
+  bundle with [UnityPy] and flattens the resolved `SerializeReference` graph
+  into one JSON file per chunk. Builds since the game's Unity 6 upgrade ("The
+  Final Cut") ship the bundle with embedded type trees, so that's all it
+  needs. For older builds without them, it falls back to pointing UnityPy's
+  `TypeTreeGenerator` at your live game install (it reads `GameAssembly.dll`
+  + `global-metadata.dat` itself, no manual `.tpk` needed). That fallback
+  can't read IL2CPP metadata v39 (Unity 6.3), which is fine because those
+  builds don't need it. Those builds also move every white check out of its
+  conversation's chunk into the bundle's `DialogueDatabase`
+  (`m_alwaysLoadedCards`); the extractor merges them back in. `rid` values are
   serialized as strings — they're 64-bit and JavaScript's `JSON.parse` would
   silently round them to the wrong integer otherwise.
 - **`build_flow_index.py`** — builds the search index and the character/skill
   browsing indexes from that chunk output.
+- **`build_changelog.py`** — diffs two extractions (e.g. before and after a
+  game update) and writes `changes.json`, which drives the viewer's "What's
+  New" popup, New tab, and NEW/CHANGED badges. Cards are matched by
+  `flowId`+`cardId`, which stay stable across builds; chunk file names and
+  `rid`s don't, so it also writes `legacy_links.json` to keep links shared
+  before the update working.
 - **`viewer.html`** — the viewer itself. Vanilla JS, no build step, no
   server-side logic beyond serving static files. Node-link graph per
   conversation (pan/zoom, click a node to see connected cards highlighted and
@@ -48,10 +60,15 @@ pip install -r requirements.txt
 python extract_dialogue.py \
   --game-root "/path/to/Game" \
   --bundle "/path/to/Game/.../some_bundle.bundle" \
-  --unity-version 2022.3.62f3 \
   --out-dir ./dialogue_data
 
-python build_flow_index.py --data-dir ./dialogue_data
+python build_flow_index.py ./dialogue_data
+
+# optional, after a game update: extract the new build into its own
+# directory, then diff it against the previous one
+python build_changelog.py ./dialogue_data_old ./dialogue_data \
+  --old-audio-list old_audio_files.txt \
+  --old-label "the previous version" --new-label "The Final Cut"
 
 # serve it locally
 cd dialogue_data && python3 -m http.server 8000

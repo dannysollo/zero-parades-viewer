@@ -44,7 +44,7 @@
   }
   #filterChip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; font-weight: 700; }
 
-  #flowList, #charList, #skillList, #searchResults { flex: 1; overflow-y: auto; }
+  #flowList, #charList, #skillList, #searchResults, #newList { flex: 1; overflow-y: auto; }
   .flow-item, .char-item, .skill-item, .search-item {
     padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12.5px;
   }
@@ -75,12 +75,6 @@
   #toolbar button:disabled { opacity: 0.4; cursor: default; }
   #toolbar button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
-  #aboutBtn {
-    position: fixed; top: 10px; right: 14px; z-index: 50;
-    padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border);
-    background: var(--panel); color: var(--muted); cursor: pointer; font-size: 11.5px; font-weight: 600;
-  }
-  #aboutBtn:hover { background: var(--tag-bg); color: var(--text); }
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100;
     display: none; align-items: center; justify-content: center; padding: 20px;
@@ -231,10 +225,101 @@
   #universeLoadingText {
     background: var(--panel); color: var(--text); padding: 16px 24px; border-radius: 10px; border: 1px solid var(--border);
   }
+
+  /* "What's new" (cards added or changed in the latest game update) */
+  :root { --new: #ff5ca8; --changed: #2ec4d6; }
+  .chg-tag {
+    display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 4px; color: #16171a; vertical-align: 1px; white-space: nowrap;
+  }
+  .chg-tag.new { background: var(--new); }
+  .chg-tag.changed { background: var(--changed); }
+  .chg-tag.removed { background: var(--tag-bg); color: var(--muted); }
+  .card.chg-new { border-color: var(--new); box-shadow: 0 0 0 1px var(--new); }
+  .card.chg-changed { border-color: var(--changed); box-shadow: 0 0 0 1px var(--changed); }
+  .chg-was {
+    margin-top: 10px; padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--changed);
+    background: var(--tag-bg); font-size: 12px;
+  }
+  .chg-was .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; margin-bottom: 3px; }
+  .chg-was .row { margin: 3px 0; }
+  .chg-was .diff { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+  .chg-was del { color: #ed4245; background: #ed424522; text-decoration: line-through; }
+  .chg-was ins { color: #2d9d52; background: #3ba55d26; text-decoration: none; border-bottom: 1px solid #3ba55d; }
+  .gnode-box.chg-new { box-shadow: 0 0 0 3px var(--new); }
+  .gnode-box.chg-changed { box-shadow: 0 0 0 3px var(--changed); }
+  .gnode-box.selected.chg-new, .gnode-box.selected.chg-changed { box-shadow: 0 0 0 2px #ffd16688, 0 0 0 5px var(--new); }
+  .gnode-box .gtype .chg-tag { font-size: 8px; padding: 0 4px; margin-left: 4px; opacity: 1; }
+  .flow-item .chg-tag, .search-item .chg-tag { margin-right: 4px; }
+  .char-item .count .chg-count { color: var(--new); font-weight: 700; }
+
+  #topButtons { position: fixed; top: 10px; right: 14px; z-index: 50; display: flex; gap: 6px; }
+  #topButtons button {
+    padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--muted); cursor: pointer; font-size: 11.5px; font-weight: 600;
+  }
+  #topButtons button:hover { background: var(--tag-bg); color: var(--text); }
+  #topButtons #whatsNewBtn { border-color: var(--new); color: var(--new); }
+
+  .modal-box.wide { max-width: 760px; }
+  #whatsNewModal .wn-sub { font-size: 12.5px; color: var(--muted); margin: -4px 0 14px 0; }
+  .wn-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .wn-stat { flex: 1 1 120px; background: var(--tag-bg); border-radius: 8px; padding: 8px 10px; }
+  .wn-stat b { display: block; font-size: 19px; font-variant-numeric: tabular-nums; }
+  .wn-stat span { font-size: 11px; color: var(--muted); }
+  .wn-stat.new b { color: var(--new); }
+  .wn-stat.changed b { color: var(--changed); }
+  .wn-legend { font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.7; }
+  .wn-toggle { display: flex; gap: 4px; margin-bottom: 10px; }
+  .wn-toggle button {
+    padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel);
+    color: var(--text); cursor: pointer; font-size: 12px;
+  }
+  .wn-toggle button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .wn-group { margin-bottom: 4px; border-top: 1px solid var(--border); }
+  .wn-group > summary {
+    cursor: pointer; padding: 8px 2px; font-size: 13.5px; font-weight: 700; display: flex; justify-content: space-between; gap: 10px;
+    list-style: none;
+  }
+  .wn-group > summary::-webkit-details-marker { display: none; }
+  .wn-group > summary::before { content: "▸"; color: var(--muted); margin-right: 6px; }
+  .wn-group[open] > summary::before { content: "▾"; }
+  .wn-group > summary .name { flex: 1; }
+  .wn-group > summary .count { font-size: 11.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .wn-flow {
+    display: block; width: 100%; text-align: left; padding: 7px 10px 7px 20px; border: none; border-radius: 6px;
+    background: none; color: var(--text); cursor: pointer; font-size: 12.5px; line-height: 1.4;
+  }
+  .wn-flow:hover { background: var(--tag-bg); }
+  .wn-flow .meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .wn-removed { font-size: 12px; color: var(--muted); padding: 3px 0 3px 20px; }
+  .wn-removed .old { text-decoration: line-through; }
 </style>
 </head>
 <body>
-<button id="aboutBtn">About</button>
+<div id="topButtons">
+  <button id="whatsNewBtn" style="display:none">What's New</button>
+  <button id="aboutBtn">About</button>
+</div>
+<div id="whatsNewModal" class="modal-overlay">
+  <div class="modal-box wide">
+    <button id="whatsNewCloseBtn" class="modal-close" title="Close">&times;</button>
+    <h2>What's new in The Final Cut</h2>
+    <div class="wn-sub" id="whatsNewSub"></div>
+    <div class="wn-stats" id="whatsNewStats"></div>
+    <div class="wn-legend">
+      <span class="chg-tag new">New</span> marks cards and conversations that were added in this update.
+      <span class="chg-tag changed">Changed</span> marks existing cards whose line, speaker, or check difficulty/skill changed (open one to see what it used to say).
+      Changed also covers existing lines that got a voice line for the first time.
+      Look for these everywhere: in the conversation list, search results, graphs, and the All Conversations map. The <b>New</b> tab on the left lists every affected conversation.
+    </div>
+    <div class="wn-toggle" id="whatsNewToggle">
+      <button data-group="partner" class="active">By character</button>
+      <button data-group="kind">By type</button>
+    </div>
+    <div id="whatsNewList"></div>
+  </div>
+</div>
 <div id="aboutModal" class="modal-overlay">
   <div class="modal-box">
     <button id="aboutCloseBtn" class="modal-close" title="Close">&times;</button>
@@ -253,6 +338,7 @@
       <button id="tabChars">Characters</button>
       <button id="tabSkills">Skills</button>
       <button id="tabSearch">Search</button>
+      <button id="tabNew" style="display:none">New</button>
     </div>
     <div id="search"><input id="searchBox" placeholder="Search flows (id / speaker / text)..." /></div>
     <div id="filterChip"><span id="filterChipText"></span><button id="clearFilter">&times;</button></div>
@@ -261,6 +347,7 @@
     <div id="charList" style="display:none"></div>
     <div id="skillList" style="display:none"></div>
     <div id="searchResults" style="display:none"></div>
+    <div id="newList" style="display:none"></div>
   </div>
   <div id="main">
     <div id="toolbar">
@@ -401,6 +488,78 @@ let activeFilter = null; // {type: "character"|"skill", value}
 let searchIndex = [];
 let currentTab = "flows";
 
+/* ---------------- what changed in the latest game update ----------------
+ * changes.json is produced by build_changelog.py by diffing the previous
+ * extraction against this one. Cards are keyed by flowId::cardId (stable
+ * across game builds), never by chunk file or rid (both get reshuffled). */
+let changes = null;
+const cardChanges = new Map(); // "flowId::cardId" -> {status: "new"|"changed", was?}
+const ridChanges = new Map();  // "flowId::rid" -> same, for search-index entries (which only carry rids)
+const flowChanges = new Map(); // flowId -> changes.json flow entry
+const newLinesByCharacter = new Map(); // speaker -> count of new lines
+function indexChanges(data) {
+  changes = data;
+  for (const fl of data.flows) {
+    flowChanges.set(fl.flowId, fl);
+    for (const c of fl.newCards) {
+      const entry = { status: "new" };
+      cardChanges.set(`${fl.flowId}::${c.c}`, entry);
+      ridChanges.set(`${fl.flowId}::${c.r}`, entry);
+      if (c.s && c.t) newLinesByCharacter.set(c.s, (newLinesByCharacter.get(c.s) || 0) + 1);
+    }
+    for (const c of fl.changedCards) {
+      const entry = { status: "changed", was: c.was };
+      cardChanges.set(`${fl.flowId}::${c.c}`, entry);
+      ridChanges.set(`${fl.flowId}::${c.r}`, entry);
+    }
+  }
+}
+function cardChange(node) {
+  if (!node || !node.m_cardId) return null;
+  return cardChanges.get(`${node.m_flowId}::${node.m_cardId}`) || null;
+}
+function changeTagHtml(status) {
+  return status ? `<span class="chg-tag ${status}">${status === "new" ? "New" : status === "changed" ? "Changed" : escapeHtml(status)}</span>` : "";
+}
+function flowChangeTagsHtml(flowId) {
+  const fl = flowChanges.get(flowId);
+  if (!fl) return "";
+  if (fl.status === "new") return changeTagHtml("new");
+  let html = "";
+  if (fl.newCards.length) html += `<span class="chg-tag new">+${fl.newCards.length} new</span>`;
+  if (fl.changedCards.length) html += `<span class="chg-tag changed">${fl.changedCards.length} changed</span>`;
+  return html;
+}
+function changeWasHtml(node, nodes) {
+  const chg = cardChange(node);
+  if (!chg || chg.status !== "changed") return "";
+  const was = chg.was || {};
+  let rows = "";
+  if ("text" in was) rows += `<div class="row diff">${wordDiffHtml(was.text || "", speakerAndText(node, nodes).text || "")}</div>`;
+  if ("speaker" in was) rows += `<div class="row">Speaker was <b>${escapeHtml(was.speaker || "(none)")}</b></div>`;
+  if ("skill" in was) rows += `<div class="row">Skill was <b>${escapeHtml(prettySkill(was.skill) || "(none)")}</b></div>`;
+  if ("difficulty" in was) rows += `<div class="row">Difficulty was <b>DC ${escapeHtml(String(was.difficulty))}</b> (now DC ${escapeHtml(String(node.m_threshold))})</div>`;
+  if (was.voice === "added") rows += `<div class="row">Wasn't voiced before; voice line added in this update</div>`;
+  return `<div class="chg-was"><div class="label">${"text" in was ? "Changes to this line" : "Before this update"}</div>${rows}</div>`;
+}
+// Word-level diff (LCS over words + whitespace) between a line's previous and
+// current text: removed words struck through, added words underlined.
+function wordDiffHtml(before, after) {
+  const a = before.split(/(\s+)/), b = after.split(/(\s+)/);
+  const n = a.length, m = b.length;
+  const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  let html = "", i = 0, j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { html += escapeHtml(a[i]); i++; j++; }
+    else if (j < m && (i === n || lcs[i][j + 1] >= lcs[i + 1][j])) { html += `<ins>${escapeHtml(b[j])}</ins>`; j++; }
+    else { html += `<del>${escapeHtml(a[i])}</del>`; i++; }
+  }
+  return html;
+}
+
 async function loadJSON(path) {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`fetch failed: ${path} (${res.status})`);
@@ -471,6 +630,9 @@ function janusAlternativesHtml(node, nodes) {
   return `<div class="janus-alts"><div class="janus-alts-label">Conditional alternative${altCount > 1 ? "s" : ""} (${altCount})</div>${rows}</div>`;
 }
 function cardBodyHtml(node, nodes) {
+  return cardBodyHtmlInner(node, nodes) + changeWasHtml(node, nodes);
+}
+function cardBodyHtmlInner(node, nodes) {
   const cd = cardDataMap(node);
   if (hasDialogueText(node)) {
     const { speaker, text } = speakerAndText(node, nodes);
@@ -566,7 +728,7 @@ async function renderFlowList(filter) {
     div.dataset.flowId = f.flowId;
     div.dataset.file = f.file;
     div.innerHTML = `
-      <div><span class="chip">${f.cardCount} cards</span><span class="fid">${f.flowId}</span></div>
+      <div>${flowChangeTagsHtml(f.flowId)}<span class="chip">${f.cardCount} cards</span><span class="fid">${f.flowId}</span></div>
       ${f.speaker ? `<div class="prev"><b>${f.speaker}:</b> ${escapeHtml(f.preview || "")}</div>` : (f.preview ? `<div class="prev">${escapeHtml(f.preview)}</div>` : `<div class="prev" style="opacity:0.5">(no text preview)</div>`)}
     `;
     div.addEventListener("click", () => selectFlow(f.flowId, f.file));
@@ -586,7 +748,8 @@ function renderCharList(filter) {
   for (const c of filtered) {
     const div = document.createElement("div");
     div.className = "char-item";
-    div.innerHTML = `<span class="name">${escapeHtml(c.character)}</span><span class="count">${c.totalLines} lines · ${c.flowCount} flows</span>`;
+    const newLines = newLinesByCharacter.get(c.character);
+    div.innerHTML = `<span class="name">${escapeHtml(c.character)}</span><span class="count">${newLines ? `<span class="chg-count">+${newLines} new</span> · ` : ""}${c.totalLines} lines · ${c.flowCount} flows</span>`;
     div.addEventListener("click", () => selectCharacter(c.character));
     frag.appendChild(div);
   }
@@ -636,7 +799,7 @@ function renderSkillChecks(skillId) {
     const div = document.createElement("div");
     div.className = "search-item";
     div.innerHTML = `
-      ${m.s ? `<div class="sspeaker">${escapeHtml(m.s)}</div>` : ""}
+      ${searchEntrySpeakerHtml(m)}
       <div class="stext">${escapeHtml(m.t)}</div>
       <div class="smeta">${escapeHtml(m.ty)}</div>
     `;
@@ -644,6 +807,13 @@ function renderSkillChecks(skillId) {
     frag.appendChild(div);
   }
   listEl.appendChild(frag);
+}
+
+function searchEntrySpeakerHtml(m) {
+  const chg = ridChanges.get(`${m.fl}::${m.r}`);
+  const tag = chg ? changeTagHtml(chg.status) : "";
+  if (!m.s && !tag) return "";
+  return `<div class="sspeaker">${tag}${m.s ? escapeHtml(m.s) : ""}</div>`;
 }
 
 /* ---------------- sidebar: full-text search tab ---------------- */
@@ -677,11 +847,73 @@ function renderSearchResults(query) {
     div.className = "search-item";
     const skillTag = m.sk ? ` · <span style="opacity:0.7">${escapeHtml(prettySkill(m.sk))}</span>` : "";
     div.innerHTML = `
-      ${m.s ? `<div class="sspeaker">${escapeHtml(m.s)}</div>` : ""}
+      ${searchEntrySpeakerHtml(m)}
       <div class="stext">${highlightMatch(m.t, q)}</div>
       <div class="smeta">${escapeHtml(m.ty)}${skillTag}</div>
     `;
     div.addEventListener("click", () => jumpToCard(m.fl, m.f, m.r));
+    frag.appendChild(div);
+  }
+  listEl.appendChild(frag);
+}
+
+/* ---------------- sidebar: what's-new tab ---------------- */
+const CHANGE_KIND_LABELS = {
+  conversation: "Conversations", orb: "Orbs (things you can inspect)", thought: "Thoughts",
+  encounter: "Dramatic encounters", bark: "Barks", other: "Other",
+};
+const CHANGE_KIND_SINGULAR = {
+  conversation: "conversation", orb: "orb", thought: "thought", encounter: "dramatic encounter", bark: "bark",
+};
+function changedFlowSummary(fl) {
+  const lines = fl.newCards.filter(c => c.t).length;
+  const bits = [];
+  if (fl.status === "new") bits.push(`new ${CHANGE_KIND_SINGULAR[fl.kind] || "flow"}`);
+  if (lines) bits.push(`${lines} new line${lines === 1 ? "" : "s"}`);
+  if (fl.changedCards.length) bits.push(`${fl.changedCards.length} changed`);
+  if (fl.removedCards.length) bits.push(`${fl.removedCards.length} removed`);
+  return bits.join(" · ");
+}
+function changedFlowPreview(fl) {
+  // for an expanded conversation, its opening line says less about what's
+  // new than the first added line itself does
+  const first = fl.status === "new" ? null : (fl.newCards.find(c => c.t) || fl.changedCards.find(c => c.t));
+  if (first) return { s: first.s, t: first.t };
+  return { s: fl.primarySpeaker, t: fl.preview };
+}
+async function openChangedFlow(fl) {
+  const file = flowFileMap.get(fl.flowId);
+  if (!file) return;
+  if (fl.status === "new") return selectFlow(fl.flowId, file);
+  // land on the first added (or changed) card, not the conversation's start
+  const target = fl.newCards.find(c => c.t) || fl.newCards[0] || fl.changedCards[0];
+  await jumpToCard(fl.flowId, file, target ? target.r : null);
+}
+function renderNewList(filter) {
+  const listEl = document.getElementById("newList");
+  if (!changes) { listEl.innerHTML = ""; return; }
+  const q = (filter || "").toLowerCase().trim();
+  const all = changes.flows.filter(fl => fl.newCards.length || fl.changedCards.length);
+  const filtered = q ? all.filter(fl => {
+    const p = changedFlowPreview(fl);
+    return (fl.partner || "").includes(q) || (fl.primarySpeaker || "").includes(q) ||
+      (p.t || "").toLowerCase().includes(q) || (fl.preview || "").toLowerCase().includes(q) ||
+      fl.newCards.some(c => (c.t || "").toLowerCase().includes(q) || (c.s || "").includes(q));
+  }) : all;
+  document.getElementById("stats").textContent = `${filtered.length} conversations added or changed in ${changes.newLabel}`;
+  listEl.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const fl of filtered) {
+    const p = changedFlowPreview(fl);
+    const div = document.createElement("div");
+    div.className = "flow-item";
+    div.dataset.flowId = fl.flowId;
+    div.dataset.file = flowFileMap.get(fl.flowId) || "";
+    div.innerHTML = `
+      <div>${flowChangeTagsHtml(fl.flowId)}<span class="fid">${escapeHtml(fl.partner || fl.primarySpeaker || "")}</span></div>
+      <div class="prev">${p.s ? `<b>${escapeHtml(p.s)}:</b> ` : ""}${escapeHtml(p.t || "(no text preview)")}</div>
+    `;
+    div.addEventListener("click", () => openChangedFlow(fl));
     frag.appendChild(div);
   }
   listEl.appendChild(frag);
@@ -708,6 +940,7 @@ const TAB_CONFIG = {
   chars: { btn: "tabChars", list: "charList", placeholder: "Search characters...", render: renderCharList },
   skills: { btn: "tabSkills", list: "skillList", placeholder: "Search skills...", render: renderSkillList },
   search: { btn: "tabSearch", list: "searchResults", placeholder: "Search all dialogue lines...", render: renderSearchResults },
+  new: { btn: "tabNew", list: "newList", placeholder: "Filter new & changed (character / text)...", render: renderNewList },
 };
 function switchTab(name) {
   currentTab = name;
@@ -771,19 +1004,41 @@ async function selectFlow(flowId, file, jumpRid = null) {
 }
 
 /* ---------------- shareable links (URL hash) ---------------- */
-function updateHash(node) {
+// Links name the card by its cardId (c=), which survives game updates. Chunk
+// files and rids both get reshuffled between builds, so links made before The
+// Final Cut (f=<chunk file>&n=<rid>) are translated via legacy_links.json.
+function updateHash(rid) {
   const params = new URLSearchParams();
   params.set("m", viewMode);
-  if (currentFile) params.set("f", currentFile);
   if (currentFlowId) params.set("fl", currentFlowId);
-  if (node) params.set("n", node);
+  const node = rid != null && currentChunk ? currentChunk.nodes[String(rid)] : null;
+  if (node && node.m_cardId) params.set("c", node.m_cardId);
   history.replaceState(null, "", "#" + params.toString());
 }
 function parseHash() {
   const params = new URLSearchParams(location.hash.slice(1));
-  const file = params.get("f"), flowId = params.get("fl");
-  if (!file || !flowId) return null;
-  return { mode: params.get("m") || "graph", file, flowId, node: params.get("n") || null };
+  const flowId = params.get("fl");
+  if (!flowId) return null;
+  return {
+    mode: params.get("m") || "graph", flowId, card: params.get("c"),
+    legacyFile: params.get("f"), legacyNode: params.get("n"),
+  };
+}
+async function resolveSharedLink(shared) {
+  const file = flowFileMap.get(shared.flowId);
+  if (!file) return null;
+  let cardId = shared.card;
+  if (!cardId && shared.legacyFile && shared.legacyNode) {
+    try {
+      const legacy = await loadJSON("legacy_links.json");
+      cardId = (legacy[shared.legacyFile] || {})[shared.legacyNode] || null;
+    } catch (e) {
+      console.error("couldn't translate an old-style link", e);
+    }
+  }
+  const chunk = await getChunk(file);
+  const rid = cardId ? ((chunk.flows[shared.flowId] || {})[cardId] ?? null) : null;
+  return { file, rid };
 }
 async function jumpToCard(flowId, file, rid) {
   await selectFlow(flowId, file, rid);
@@ -857,10 +1112,12 @@ async function renderReaderCard(rid) {
 
   const cardType = node.m_cardType || node.type;
   const cardDiv = document.createElement("div");
-  cardDiv.className = "card";
+  const chg = cardChange(node);
+  cardDiv.className = "card" + (chg ? ` chg-${chg.status}` : "");
   cardDiv.innerHTML = `
     <div class="head">
       <span class="badge ${cardType}">${escapeHtml(prettyCardType(node))}</span>
+      ${chg ? changeTagHtml(chg.status) : ""}
     </div>
     ${cardBodyHtml(node, nodes)}
   `;
@@ -902,7 +1159,8 @@ async function renderReaderCard(rid) {
         label = summarizeText(target.node, target.nodes);
         if (target.file !== currentFile) label += `  [other flow]`;
       }
-      btn.innerHTML = `${bt.pinName ? `<span class="pin">${escapeHtml(bt.pinName)}</span>` : ""}${escapeHtml(label)}`;
+      const targetChg = target ? cardChange(target.node) : null;
+      btn.innerHTML = `${targetChg ? changeTagHtml(targetChg.status) + " " : ""}${bt.pinName ? `<span class="pin">${escapeHtml(bt.pinName)}</span>` : ""}${escapeHtml(label)}`;
       if (target) btn.addEventListener("click", () => navigateTo(target.file, target.rid));
       branchesDiv.appendChild(btn);
     }
@@ -1124,7 +1382,8 @@ function drawGraph() {
       innerHtml = `<div class="gtype">→ other conversation</div><div class="gtext">${escapeHtml(gn.flowId)}</div>`;
     } else {
       const { speaker, text } = hasDialogueText(gn.node) ? speakerAndText(gn.node, currentGraph.nodes) : {};
-      innerHtml = `<div class="gtype">${escapeHtml(prettyCardType(gn.node))}</div>`;
+      const chg = cardChange(gn.node);
+      innerHtml = `<div class="gtype">${escapeHtml(prettyCardType(gn.node))}${chg ? changeTagHtml(chg.status) : ""}</div>`;
       if (speaker) innerHtml += `<div class="gspeaker">${escapeHtml(speaker)}</div>`;
       innerHtml += `<div class="gtext">${escapeHtml(text || "")}</div>`;
       if (CHECK_TYPES.has(gn.node.type)) {
@@ -1145,6 +1404,8 @@ function drawGraph() {
       }
     }
     div.className = `gnode-box type-${nodeTypeClass(gn.external ? null : gn.node)}`;
+    const nodeChg = gn.external ? null : cardChange(gn.node);
+    if (nodeChg) div.classList.add(`chg-${nodeChg.status}`);
     if (gn.key === selectedNodeKey) div.classList.add("selected");
     if (connectedKeys && !connectedKeys.has(gn.key)) div.classList.add("dimmed");
     if (!gn.external && activeFilter?.type === "character") {
@@ -1168,9 +1429,13 @@ function drawLegend(targetId = "legend") {
   const items = [
     ["#3ba55d", "start/end"], ["#5865f2", "dialogue"], ["#faa61a", "fork (condition)"],
     ["#949cf7", "hub"], ["#ed4245", "jump"], ["#3ba57a", "passive check"],
-    ["#d1495b", "anti-passive check"], ["#9aa0a6", "white/red check"], ["transparent", "other conversation"],
+    ["#d1495b", "anti-passive check"], ["#9aa0a6", "skill check"], ["transparent", "other conversation"],
   ];
   el.innerHTML = items.map(([c, l]) => `<span><i style="background:${c};${c==='transparent'?'border:1px dashed var(--muted)':''}"></i>${l}</span>`).join("");
+  if (changes) {
+    el.innerHTML += `<span><i style="border:2px solid var(--new)"></i>new in ${escapeHtml(changes.newLabel)}</span>` +
+      `<span><i style="border:2px solid var(--changed)"></i>changed</span>`;
+  }
 }
 
 async function onNodeClick(gn) {
@@ -1198,7 +1463,7 @@ async function onNodeClick(gn) {
   } else {
     panel.innerHTML = `
       <span class="closeBtn" onclick="document.getElementById('detailPanel').style.display='none'">&times;</span>
-      <h3>${escapeHtml(prettyCardType(gn.node))}</h3>
+      <h3>${escapeHtml(prettyCardType(gn.node))} ${changeTagHtml(cardChange(gn.node)?.status)}</h3>
       <div style="margin:8px 0">${cardBodyHtml(gn.node, currentGraph.nodes)}</div>
       <details class="raw"><summary>raw node data</summary><pre>${escapeHtml(JSON.stringify(gn.node, null, 1))}</pre></details>
     `;
@@ -1323,6 +1588,7 @@ const NODE_COLORS = {
   fork: "#faa61a", hub: "#949cf7", jump: "#ed4245", passive: "#3ba57a", antipassive: "#d1495b",
   check: "#9aa0a6", other: "#5c6067", external: "#6a6d73",
 };
+const CHANGE_COLORS = { new: "#ff5ca8", changed: "#2ec4d6" }; // match --new / --changed
 function nodeColor(gn) {
   return NODE_COLORS[nodeTypeClass(gn.external ? null : gn.node)] || "#5c6067";
 }
@@ -1763,8 +2029,14 @@ function drawUniverse() {
       }
     } else {
       // too far zoomed out for individual nodes to matter -- draw one blob for the whole cluster
-      ctx.fillStyle = "#5865f299";
+      const fl = flowChanges.get(c.flowId);
+      ctx.fillStyle = fl?.status === "new" ? CHANGE_COLORS.new + "cc" : "#5865f299";
       ctx.fillRect(c.offsetX, c.offsetY, c.width, c.height);
+      if (fl && fl.status !== "new") {
+        ctx.lineWidth = 3 / uZoom;
+        ctx.strokeStyle = fl.newCards.length ? CHANGE_COLORS.new : CHANGE_COLORS.changed;
+        ctx.strokeRect(c.offsetX, c.offsetY, c.width, c.height);
+      }
       continue;
     }
 
@@ -1814,6 +2086,13 @@ function drawUniverseNode(ctx, gn, cluster, x, y, showText) {
   ctx.beginPath();
   ctx.roundRect ? ctx.roundRect(x, y, NODE_W, NODE_H, r) : ctx.rect(x, y, NODE_W, NODE_H);
   ctx.fill();
+  if (gn.chg === undefined) gn.chg = gn.external ? null : cardChange(gn.node); // cached: drawn every frame
+  if (gn.chg) {
+    // world units, but never thinner than ~2.5 screen px so it still reads zoomed out
+    ctx.lineWidth = Math.max(8, 2.5 / uZoom);
+    ctx.strokeStyle = CHANGE_COLORS[gn.chg.status];
+    ctx.stroke();
+  }
   if (isSelected) {
     ctx.lineWidth = 2.5 / uZoom;
     ctx.strokeStyle = "#ffd166";
@@ -2019,7 +2298,98 @@ document.getElementById("aboutModal").addEventListener("click", (e) => {
   if (e.target.id === "aboutModal") document.getElementById("aboutModal").style.display = "none";
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") document.getElementById("aboutModal").style.display = "none";
+  if (e.key === "Escape") { document.getElementById("aboutModal").style.display = "none"; closeWhatsNew(); }
+});
+
+/* ---------------- "What's new" popup ---------------- */
+const WHATS_NEW_SEEN_KEY = "zp-whats-new-seen";
+let whatsNewGrouping = "partner";
+function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+function renderWhatsNew() {
+  const t = changes.totals;
+  document.getElementById("whatsNewSub").textContent =
+    `Everything that differs between ${changes.oldLabel} and ${changes.newLabel}. Click any entry to open it.`;
+  const stats = [
+    ["new", t.newFlows, "new conversations"],
+    ["new", t.newLines, "new lines"],
+    ["", t.updatedFlows, "existing conversations touched"],
+    ["changed", t.changedCards, "changed cards"],
+  ];
+  if (t.newlyVoicedCards) stats.push(["changed", t.newlyVoicedCards, "existing lines newly voiced"]);
+  if (t.removedLines) stats.push(["", t.removedLines, "lines removed"]);
+  document.getElementById("whatsNewStats").innerHTML = stats.map(([cls, n, label]) =>
+    `<div class="wn-stat ${cls}"><b>${n.toLocaleString()}</b><span>${label}</span></div>`).join("");
+
+  const groups = new Map();
+  for (const fl of changes.flows) {
+    if (!fl.newCards.length && !fl.changedCards.length) continue;
+    const key = whatsNewGrouping === "kind"
+      ? (CHANGE_KIND_LABELS[fl.kind] || fl.kind)
+      : (fl.partner ? capitalize(fl.partner) : "Narration & Herschel alone");
+    if (!groups.has(key)) groups.set(key, { flows: [], newLines: 0, changed: 0 });
+    const g = groups.get(key);
+    g.flows.push(fl);
+    g.newLines += fl.newCards.filter(c => c.t).length;
+    g.changed += fl.changedCards.length;
+  }
+  const sorted = [...groups.entries()].sort((a, b) => (b[1].newLines - a[1].newLines) || (b[1].changed - a[1].changed));
+
+  const listEl = document.getElementById("whatsNewList");
+  listEl.innerHTML = "";
+  sorted.forEach(([name, g], i) => {
+    const det = document.createElement("details");
+    det.className = "wn-group";
+    if (i < 2) det.open = true;
+    const counts = [];
+    if (g.newLines) counts.push(`${g.newLines} new lines`);
+    if (g.changed) counts.push(`${g.changed} changed`);
+    counts.push(`${g.flows.length} conversation${g.flows.length === 1 ? "" : "s"}`);
+    det.innerHTML = `<summary><span class="name">${escapeHtml(name)}</span><span class="count">${counts.join(" · ")}</span></summary>`;
+    for (const fl of g.flows) {
+      const p = changedFlowPreview(fl);
+      const btn = document.createElement("button");
+      btn.className = "wn-flow";
+      const where = whatsNewGrouping === "kind" ? capitalize(fl.partner || fl.primarySpeaker || "") : "";
+      btn.innerHTML = `${flowChangeTagsHtml(fl.flowId)} ${p.s ? `<b>${escapeHtml(p.s)}:</b> ` : ""}${escapeHtml(p.t || "(no text preview)")}
+        <div class="meta">${escapeHtml([where, changedFlowSummary(fl)].filter(Boolean).join(" · "))}</div>`;
+      btn.addEventListener("click", () => { closeWhatsNew(); openChangedFlow(fl); });
+      det.appendChild(btn);
+    }
+    listEl.appendChild(det);
+  });
+
+  const removed = changes.flows.flatMap(fl => fl.removedCards.filter(c => c.t));
+  if (removed.length) {
+    const det = document.createElement("details");
+    det.className = "wn-group";
+    det.innerHTML = `<summary><span class="name">Removed lines</span><span class="count">${removed.length} lines no longer in the game</span></summary>` +
+      removed.map(c => `<div class="wn-removed">${c.s ? `<b>${escapeHtml(c.s)}:</b> ` : ""}<span class="old">${escapeHtml(c.t)}</span></div>`).join("");
+    listEl.appendChild(det);
+  }
+}
+function openWhatsNew() {
+  if (!changes) return;
+  renderWhatsNew();
+  document.getElementById("whatsNewModal").style.display = "flex";
+  try { localStorage.setItem(WHATS_NEW_SEEN_KEY, changes.newLabel); } catch (e) { /* storage blocked: popup just shows again next time */ }
+}
+function closeWhatsNew() {
+  document.getElementById("whatsNewModal").style.display = "none";
+}
+function whatsNewAlreadySeen() {
+  try { return localStorage.getItem(WHATS_NEW_SEEN_KEY) === changes.newLabel; } catch (e) { return false; }
+}
+document.getElementById("whatsNewBtn").addEventListener("click", openWhatsNew);
+document.getElementById("whatsNewCloseBtn").addEventListener("click", closeWhatsNew);
+document.getElementById("whatsNewModal").addEventListener("click", (e) => {
+  if (e.target.id === "whatsNewModal") closeWhatsNew();
+});
+document.getElementById("whatsNewToggle").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-group]");
+  if (!btn) return;
+  whatsNewGrouping = btn.dataset.group;
+  document.querySelectorAll("#whatsNewToggle button").forEach(b => b.classList.toggle("active", b === btn));
+  renderWhatsNew();
 });
 
 async function goToRandomConversation() {
@@ -2047,12 +2417,20 @@ document.getElementById("randomBtn").addEventListener("click", goToRandomConvers
   characters = await loadJSON("characters.json");
   skills = await loadJSON("skills.json");
   for (const f of flowsIndex) flowFileMap.set(f.flowId, f.file);
+  try {
+    indexChanges(await loadJSON("changes.json"));
+    document.getElementById("whatsNewBtn").style.display = "";
+    document.getElementById("tabNew").style.display = "";
+  } catch (e) {
+    console.error("no changes.json; skipping what's-new markers", e);
+  }
   renderFlowList("");
   document.getElementById("randomBtn").disabled = false;
   loadJSON("search_index.json").then(data => { searchIndex = data; }); // big-ish (~13MB); don't block first paint on it
 
   const shared = parseHash();
-  if (shared) {
+  const sharedTarget = shared ? await resolveSharedLink(shared) : null;
+  if (sharedTarget) {
     viewMode = shared.mode === "reader" ? "reader" : "graph";
     document.getElementById(viewMode === "reader" ? "readerModeBtn" : "graphModeBtn").classList.add("active");
     document.getElementById(viewMode === "reader" ? "graphModeBtn" : "readerModeBtn").classList.remove("active");
@@ -2064,13 +2442,14 @@ document.getElementById("randomBtn").addEventListener("click", goToRandomConvers
     document.getElementById("restartBtn").style.display = viewMode === "reader" ? "inline-block" : "none";
     document.getElementById("zoomResetBtn").style.display = viewMode === "reader" ? "none" : "inline-block";
     try {
-      await selectFlow(shared.flowId, shared.file, shared.node);
+      await selectFlow(shared.flowId, sharedTarget.file, sharedTarget.rid);
     } catch (e) {
       console.error("failed to restore shared link", e);
     }
   } else {
     // no specific shared link -- land on the "All Conversations" atlas by default
     document.getElementById("crumbInfo").textContent = "All conversations";
+    if (changes && !whatsNewAlreadySeen()) openWhatsNew();
     await loadUniverse();
   }
 })();
