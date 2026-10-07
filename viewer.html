@@ -2262,6 +2262,11 @@ document.getElementById("graphModeBtn").addEventListener("click", async () => {
   }
 });
 document.getElementById("readerModeBtn").addEventListener("click", async () => {
+  // coming from the graph with a card selected: open the reader on that card
+  // instead of the start of the conversation
+  const selected = viewMode === "graph" && currentGraph && selectedNodeKey !== null
+    ? currentGraph.gnodes.get(selectedNodeKey) : null;
+  const jumpRid = selected && !selected.external ? selected.key : null;
   viewMode = "reader";
   hideAllModeViews();
   document.getElementById("readerModeBtn").classList.add("active");
@@ -2270,7 +2275,7 @@ document.getElementById("readerModeBtn").addEventListener("click", async () => {
   document.getElementById("zoomResetBtn").style.display = "none";
   if (currentFlowId && currentFile) {
     document.getElementById("readerScroll").style.display = "block";
-    await openReaderStart(currentFlowId, currentFile);
+    await openReaderStart(currentFlowId, currentFile, jumpRid);
   } else {
     document.getElementById("placeholder").style.display = "block";
   }
